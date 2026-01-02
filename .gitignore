@@ -1,0 +1,29 @@
+# =========================
+# Credenciales (NO subir)
+# =========================
+systec/_clients/*/tec/config/instance.php
+systec/_cores/**/config/instance.php
+# =========================
+# Auditorías / utilidades temporales (NO subir)
+# =========================
+systec/_clients/*/tec/public/audit_db.php
+superadmin/**/audit_db.php
+# =========================
+# Storage por cliente (NO subir evidencias/firma reales)
+# =========================
+systec/_clients/*/tec/storage/**
+!systec/_clients/*/tec/storage/.gitkeep
+
+# =========================
+# Dreamweaver / Sync noise
+# =========================
+**/_notes/
+**/.dwsync.xml
+**/*.dwl
+**/*.dwt.c
+
+# =========================
+# OS / Editor noise
+# =========================
+.DS_Store
+Thumbs.db
