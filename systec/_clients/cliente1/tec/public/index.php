@@ -12,7 +12,7 @@ error_reporting(E_ALL);
  */
 
 // ✅ Rutas correctas según tu estructura REAL
-define('SYSTEC_CORE_PATH', realpath(__DIR__ . '/../../../../_cores/systec/v1.1'));
+define('SYSTEC_CORE_PATH', realpath(__DIR__ . '/../../../../_cores/systec/v1.2'));
 define('SYSTEC_INSTANCE_PATH', realpath(__DIR__ . '/../config/instance.php'));
 
 // ✅ Validaciones
