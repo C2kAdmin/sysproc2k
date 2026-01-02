@@ -33,7 +33,7 @@ require_once __DIR__ . '/../includes/sidebar.php';
 }
 .evi-imgbox {
     background: #f8f9fa;          /* 👈 NO negro */
-    border-radius: 12px;
+border-radius: 12px;
     padding: 10px;
     border: 1px solid #eee;
     display:flex;
@@ -44,7 +44,7 @@ require_once __DIR__ . '/../includes/sidebar.php';
     max-width: 100%;
     max-height: 72vh;
     object-fit: contain;          /* Respeta proporción */
-    border-radius: 10px;
+border-radius: 10px;
     background: #fff;
 }
 </style>
@@ -57,9 +57,9 @@ require_once __DIR__ . '/../includes/sidebar.php';
         <h4 class="mb-0">Evidencia #<?php echo (int)$ev['id']; ?></h4>
 
         <a class="btn btn-outline-primary btn-sm"
-           href="<?php echo $APP; ?>/order/orden_detalle.php?id=<?php echo (int)$ev['orden_id']; ?>">
+           href="<?php echo url('/order/orden_detalle.php?id='.(int)$ev['orden_id']); ?>">
           ← Volver a la orden
-        </a>
+</a>
       </div>
 
       <div class="evi-wrap">
@@ -88,16 +88,16 @@ alt="Evidencia">
 
         <div class="mt-3">
           <a class="btn btn-sm btn-dark"
-             href="<?php echo $APP; ?>/order/orden_evidencias.php?id=<?php echo (int)$ev['orden_id']; ?>">
+             href="<?php echo url('/order/orden_evidencias.php?id='.(int)$ev['orden_id']); ?>">
             Abrir evidencias
-          </a>
+</a>
 
           <a class="btn btn-sm btn-outline-secondary"
              target="_blank"
              rel="noopener"
-             href="<?php echo $APP; ?>/order/evidencia_ver.php?id=<?php echo (int)$ev['id']; ?>">
+             href="<?php echo url('/order/evidencia_ver.php?id='.(int)$ev['id']); ?>">
             Abrir archivo original
-          </a>
+</a>
         </div>
       </div>
 
