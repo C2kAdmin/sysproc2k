@@ -202,3 +202,4 @@ Regla simple para el equipo:
 - Si falla, cambiar de archivo (o esperar unos minutos) porque suele ser rate-limit intermitente.
 
 Fin. GitHub a veces se pone exquisito, pero con esto lo leemos igual 😄
+
