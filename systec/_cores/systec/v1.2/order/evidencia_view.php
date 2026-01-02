@@ -1,20 +1,12 @@
 <?php
 // order/evidencia_view.php
-require_once __DIR__ . '/../config/config.php';
-
-$APP = defined('APP_URL') ? APP_URL : '/SysTec_c2k_v1.1';
-
-if (!isset($_SESSION['usuario_id'])) {
-    header('Location: ' . $APP . '/login.php');
-    exit;
-}
-
+require_once __DIR__ . '/../config/auth.php';
+require_login();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($id <= 0) {
-    header('Location: ' . $APP . '/dashboard.php');
+    header('Location: ' . url('/dashboard.php'));
     exit;
 }
-
 $stmt = $pdo->prepare("
     SELECT e.id, e.orden_id, e.tipo, e.comentario, e.visible_cliente, e.fecha, e.archivo
     FROM ordenes_evidencias e
@@ -25,10 +17,9 @@ $stmt->execute([$id]);
 $ev = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$ev) {
-    header('Location: ' . $APP . '/dashboard.php');
+    header('Location: ' . url('/dashboard.php'));
     exit;
 }
-
 require_once __DIR__ . '/../includes/header.php';
 require_once __DIR__ . '/../includes/sidebar.php';
 ?>
@@ -91,8 +82,8 @@ require_once __DIR__ . '/../includes/sidebar.php';
         <?php endif; ?>
 
         <div class="evi-imgbox">
-          <img src="<?php echo $APP; ?>/order/evidencia_ver.php?id=<?php echo (int)$ev['id']; ?>"
-               alt="Evidencia">
+          <img src="<?php echo url('/order/evidencia_ver.php?id='.(int)$ev['id']); ?>"
+alt="Evidencia">
         </div>
 
         <div class="mt-3">

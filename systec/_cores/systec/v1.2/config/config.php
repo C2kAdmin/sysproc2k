@@ -160,11 +160,14 @@ if (!function_exists('core_url')) {
    ========================================================== */
 if (!defined('SYSTEC_VERSION')) {
     // Prioridad: instance.php puede sobre-escribir si quieres por cliente
-    $ver = trim((string)($INSTANCE['SYSTEC_VERSION'] ?? 'v1.1'));
-    if ($ver === '') $ver = 'v1.1';
+    // Default: usa el nombre de la carpeta del CORE (v1.1 / v1.2 / v1.3…)
+    $defaultCoreVer = basename((string)APP_BASE);
+
+    $ver = trim((string)($INSTANCE['SYSTEC_VERSION'] ?? $defaultCoreVer));
+    if ($ver === '') $ver = ($defaultCoreVer !== '' ? $defaultCoreVer : 'v1.2');
+
     define('SYSTEC_VERSION', $ver);
 }
-
 /**
  * ✅ DB (desde instance.php o defaults)
  */

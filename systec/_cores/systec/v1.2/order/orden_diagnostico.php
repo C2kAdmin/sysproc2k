@@ -1,36 +1,19 @@
 <?php
 // order/orden_diagnostico.php
 
-require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../config/auth.php';
 
-$APP = defined('APP_URL') ? APP_URL : '/SysTec_c2k_v1.1';
+// ✅ ADMIN y TECNICO (SUPER_ADMIN se permite automáticamente)
+require_role(['ADMIN','TECNICO']);
 
-// ------------------------------
-// 1) Verificar sesión y rol
-// ------------------------------
-if (!isset($_SESSION['usuario_id'])) {
-    header('Location: ' . $APP . '/login.php');
-    exit;
-}
-
-$usuarioRol = $_SESSION['usuario_rol'] ?? '';
-// Solo ADMIN y TECNICO pueden usar esta pantalla
-$usuarioRol = strtoupper(trim($_SESSION['usuario_rol'] ?? ''));
-
-// ADMIN, TECNICO y SUPER_ADMIN pueden usar esta pantalla
-if (!in_array($usuarioRol, ['ADMIN', 'TECNICO', 'SUPER_ADMIN'], true)) {
-    header('Location: ' . $APP . '/dashboard.php');
-    exit;
-}
 // ------------------------------
 // 2) Tomar ID de la URL
 // ------------------------------
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($id <= 0) {
-    header('Location: ' . $APP . '/dashboard.php');
+    header('Location: ' . url('/dashboard.php'));
     exit;
 }
-
 $mensaje_error = '';
 
 // Anti doble submit
@@ -47,10 +30,9 @@ $stmt->execute([':id' => $id]);
 $orden = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$orden) {
-    header('Location: ' . $APP . '/dashboard.php');
+    header('Location: ' . url('/dashboard.php'));
     exit;
 }
-
 // Estado actual antes (para saber si cambia)
 $estadoActualAntes = $orden['estado_actual'] ?? '';
 
@@ -171,8 +153,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->commit();
 
-            header('Location: ' . $APP . '/order/orden_detalle.php?id=' . $id);
-            exit;
+            header('Location: ' . url('/order/orden_detalle.php?id=' . $id));
+exit;
 
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -238,8 +220,8 @@ require_once __DIR__ . '/../includes/sidebar.php';
                         </div>
                     </div>
                     <div>
-                        <a href="<?php echo $APP; ?>/order/orden_detalle.php?id=<?php echo (int)$orden['id']; ?>"
-                           class="btn btn-outline-secondary btn-sm">
+                        <a href="<?php echo url('/order/orden_detalle.php?id='.(int)$orden['id']); ?>"
+class="btn btn-outline-secondary btn-sm">
                             Volver al detalle
                         </a>
                     </div>
@@ -247,8 +229,8 @@ require_once __DIR__ . '/../includes/sidebar.php';
 
                 <div class="card-body">
 
-                    <form method="post" action="<?php echo $APP; ?>/order/orden_diagnostico.php?id=<?php echo (int)$orden['id']; ?>">
-                        <input type="hidden" name="_anti_token" value="<?php echo htmlspecialchars($antiToken); ?>">
+                    <form method="post" action="<?php echo url('/order/orden_diagnostico.php?id='.(int)$orden['id']); ?>">
+<input type="hidden" name="_anti_token" value="<?php echo htmlspecialchars($antiToken); ?>">
 
                         <div class="row">
                             <!-- Diagnóstico -->
