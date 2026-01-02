@@ -63,10 +63,12 @@ $base_url_public  = sa_post('base_url_public');
     $corePath = SYSTEC_ROOT ? (SYSTEC_ROOT . '/_cores/systec/' . $core_version) : '';
     if (!$corePath || !is_dir($corePath) || !is_file($corePath . '/router.php')) {
         $errors[] = 'core_version no existe en el servidor (' . htmlspecialchars($core_version, ENT_QUOTES, 'UTF-8') . ').';
-    }
-
-    // Calcular base_url_public si no viene
+    }    // Calcular base_url_public si no viene
     if ($base_url_public === '') {
+        $https  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+        $scheme = $https ? 'https://' : 'http://';
+        $host   = (string)($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost');
+
         $script = str_replace('\\','/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
         $pos = strpos($script, '/superadmin/systec_creator');
         $sysproWeb = ($pos !== false) ? substr($script, 0, $pos) : rtrim(dirname($script), '/');
@@ -75,8 +77,7 @@ $base_url_public  = sa_post('base_url_public');
         $pubPath = $sysproWeb . '/systec/_clients/' . $slug . '/tec/public/';
         $base_url_public = $scheme . $host . $pubPath;
     }
-
-    // Validar duplicados en BD master y FS
+// Validar duplicados en BD master y FS
     if (empty($errors)) {
         try {
             $pdo = sa_pdo();
@@ -149,6 +150,12 @@ if (!SYSTEC_INSTANCE_PATH || !is_file(SYSTEC_INSTANCE_PATH)) {
     exit('❌ instance.php no encontrado');
 }
 
+// ✅ APP_URL de ESTA instancia (ruta pública donde vive /public/)
+// (Debe definirse ANTES de cargar instance.php para que APP_URL salga correcto en config)
+$base = rtrim(str_replace('\\','/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+if ($base === '/' || $base === '') $base = '';
+define('SYSTEC_APP_URL', $base . '/');
+
 // ✅ display_errors depende de ENV (dev/prod) definido en instance.php
 $__cfg = require SYSTEC_INSTANCE_PATH;
 $__env = strtolower((string)($__cfg['ENV'] ?? 'prod'));
@@ -162,12 +169,6 @@ if ($__env === 'dev') {
     ini_set('display_startup_errors', '0');
     error_reporting(E_ALL);
 }
-
-// ✅ APP_URL de ESTA instancia (ruta pública donde vive /public/)
-$base = rtrim(str_replace('\\','/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
-if ($base === '/' || $base === '') $base = '';
-define('SYSTEC_APP_URL', $base . '/');
-
 // ✅ CORE_URL (ruta web al CORE) para cargar assets directo desde el CORE
 $docRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
 $coreFs  = realpath(SYSTEC_CORE_PATH);
