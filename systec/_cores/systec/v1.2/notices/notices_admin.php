@@ -177,10 +177,13 @@ try {
     $lista = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 } catch (Exception $e) {
+    $dbNameNow = '';
+    try { $dbNameNow = (string)$pdo->query("SELECT DATABASE()")->fetchColumn(); } catch (Exception $x) {}
+
     if (defined('ENV') && ENV === 'dev') {
-        $mensaje_error = $mensaje_error ?: ('Error listado notices: ' . $e->getMessage());
+        $mensaje_error = $mensaje_error ?: ('Error listado notices: ' . $e->getMessage() . ' | DB=' . $dbNameNow);
     } else {
-        $mensaje_error = $mensaje_error ?: 'Error consultando notices. Revisa tabla/columnas.';
+        $mensaje_error = $mensaje_error ?: ('Error consultando notices. DB=' . $dbNameNow);
     }
     $lista = [];
 }

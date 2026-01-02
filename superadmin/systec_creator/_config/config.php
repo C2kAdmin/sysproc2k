@@ -16,8 +16,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 }
 
 // Base URL del módulo (autodetect)
-// Ej: https://c2k.cl/syspro/superadmin/systec_creator
-$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+// Ej: https://c2k.cl/sysproc2k/superadmin/systec_creator
+$https  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+$scheme = $https ? 'https://' : 'http://';
 $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $dir    = str_replace('\\', '/', rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/'));
 
@@ -33,21 +34,21 @@ if (!function_exists('sa_url')) {
 }
 
 // Rutas físicas útiles para provisioning
-define('SYS_ROOT', realpath(__DIR__ . '/../../../') ?: ''); // -> /syspro
+define('SYS_ROOT', realpath(__DIR__ . '/../../../') ?: ''); // -> /sysproc2k
 define('SYSTEC_ROOT', SYS_ROOT ? (SYS_ROOT . '/systec') : '');
 define('SYSTEC_CLIENTS_ROOT', SYSTEC_ROOT ? (SYSTEC_ROOT . '/_clients') : '');
 define('SYSTEC_CORES_ROOT', SYSTEC_ROOT ? (SYSTEC_ROOT . '/_cores') : '');
 
-// -------------------------------
-// ✅ BD MASTER (REGISTRY CLIENTES)
-// -------------------------------
-// ⚠️ AJUSTA ESTOS 4 DATOS (una sola vez)
+// ----------------------------------------
+// ✅ BD CENTRAL DEL CREATOR (Auth + Registry)
+// ----------------------------------------
+// ⚠️ Si tu PASS NO lleva punto final, quítalo.
 define('MASTER_DB_HOST', 'localhost');
-define('MASTER_DB_NAME', 'ckcl_sys_systec_master');
-define('MASTER_DB_USER', 'CHANGE_ME');
-define('MASTER_DB_PASS', 'CHANGE_ME');
+define('MASTER_DB_NAME', 'ckcl_superadmin');
+define('MASTER_DB_USER', 'ckcl_superadmin');
+define('MASTER_DB_PASS', '112233Kdoki.');
 
-// PDO master (registry)
+// PDO master (auth + registry)
 if (!function_exists('sa_pdo')) {
     function sa_pdo(): PDO
     {
@@ -94,4 +95,3 @@ if (!function_exists('sa_post')) {
         return isset($_POST[$key]) ? trim((string)$_POST[$key]) : $default;
     }
 }
-
