@@ -2,12 +2,12 @@
 # Credenciales (NO subir)
 # =========================
 systec/_clients/*/tec/config/instance.php
-
+systec/_cores/**/config/instance.php
 # =========================
 # Auditorías / utilidades temporales (NO subir)
 # =========================
 systec/_clients/*/tec/public/audit_db.php
-
+superadmin/**/audit_db.php
 # =========================
 # Storage por cliente (NO subir evidencias/firma reales)
 # =========================
