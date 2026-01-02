@@ -28,15 +28,15 @@ function sa_mkdir(string $path): bool {
 }
 
 // Defaults
-$slug            = '';
-$nombre_comercial= '';
-$db_host         = 'localhost';
-$db_name         = '';
-$db_user         = '';
-$db_pass         = '';
-$activo          = 1;
-$core_version    = 'v1.2';
-$base_url_public = '';
+$slug             = '';
+$nombre_comercial = '';
+$db_host          = 'localhost';
+$db_name          = '';
+$db_user          = '';
+$db_pass          = '';
+$activo           = 1;
+$core_version     = 'v1.2';
+$base_url_public  = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -48,12 +48,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $db_pass          = (string)($_POST['db_pass'] ?? '');
     $activo           = isset($_POST['activo']) ? 1 : 0;
     $core_version     = sa_post('core_version', 'v1.2');
-$base_url_public  = sa_post('base_url_public');
+    $base_url_public  = sa_post('base_url_public');
 
     // Validaciones mínimas
     if ($slug === '' || !sa_valid_slug($slug)) {
         $errors[] = 'Slug inválido. Solo a-z 0-9 _ - (minúsculas, sin espacios).';
-    }    if ($db_host === '' || $db_name === '' || $db_user === '' || $db_pass === '') {
+    }
+
+    if ($db_host === '' || $db_name === '' || $db_user === '' || $db_pass === '') {
         $errors[] = 'DB host/name/user/pass son obligatorios.';
     }
 
@@ -85,9 +87,11 @@ $base_url_public  = sa_post('base_url_public');
 
     // Validar core_version exista físicamente
     $corePath = SYSTEC_ROOT ? (SYSTEC_ROOT . '/_cores/systec/' . $core_version) : '';
-if (!$corePath || !is_dir($corePath) || !is_file($corePath . '/router.php')) {
+    if (!$corePath || !is_dir($corePath) || !is_file($corePath . '/router.php')) {
         $errors[] = 'core_version no existe en el servidor (' . htmlspecialchars($core_version, ENT_QUOTES, 'UTF-8') . ').';
-    }    // Calcular base_url_public si no viene
+    }
+
+    // Calcular base_url_public si no viene
     if ($base_url_public === '') {
         $https  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
         $scheme = $https ? 'https://' : 'http://';
@@ -101,7 +105,8 @@ if (!$corePath || !is_dir($corePath) || !is_file($corePath . '/router.php')) {
         $pubPath = $sysproWeb . '/systec/_clients/' . $slug . '/tec/public/';
         $base_url_public = $scheme . $host . $pubPath;
     }
-// Validar duplicados en BD master y FS
+
+    // Validar duplicados en BD master y FS
     if (empty($errors)) {
         try {
             $pdo = sa_pdo();
@@ -176,15 +181,15 @@ if (!SYSTEC_INSTANCE_PATH || !is_file(SYSTEC_INSTANCE_PATH)) {
 
 // ✅ APP_URL de ESTA instancia (ruta pública donde vive /public/)
 // (Debe definirse ANTES de cargar instance.php para que APP_URL salga correcto en config)
-$base = rtrim(str_replace('\\','/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
-if ($base === '/' || $base === '') $base = '';
-define('SYSTEC_APP_URL', $base . '/');
+\$base = rtrim(str_replace('\\\\','/', dirname(\$_SERVER['SCRIPT_NAME'] ?? '')), '/');
+if (\$base === '/' || \$base === '') \$base = '';
+define('SYSTEC_APP_URL', \$base . '/');
 
 // ✅ display_errors depende de ENV (dev/prod) definido en instance.php
-$__cfg = require SYSTEC_INSTANCE_PATH;
-$__env = strtolower((string)($__cfg['ENV'] ?? 'prod'));
+\$__cfg = require SYSTEC_INSTANCE_PATH;
+\$__env = strtolower((string)(\$__cfg['ENV'] ?? 'prod'));
 
-if ($__env === 'dev') {
+if (\$__env === 'dev') {
     ini_set('display_errors', '1');
     ini_set('display_startup_errors', '1');
     error_reporting(E_ALL);
@@ -193,22 +198,23 @@ if ($__env === 'dev') {
     ini_set('display_startup_errors', '0');
     error_reporting(E_ALL);
 }
-// ✅ CORE_URL (ruta web al CORE) para cargar assets directo desde el CORE
-$docRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
-$coreFs  = realpath(SYSTEC_CORE_PATH);
 
-$coreRel = '';
-if ($docRoot && $coreFs && strpos($coreFs, $docRoot) === 0) {
-    $coreRel = str_replace('\\','/', substr($coreFs, strlen($docRoot)));
-    $coreRel = '/' . ltrim($coreRel, '/');
+// ✅ CORE_URL (ruta web al CORE) para cargar assets directo desde el CORE
+\$docRoot = realpath(\$_SERVER['DOCUMENT_ROOT'] ?? '');
+\$coreFs  = realpath(SYSTEC_CORE_PATH);
+
+\$coreRel = '';
+if (\$docRoot && \$coreFs && strpos(\$coreFs, \$docRoot) === 0) {
+    \$coreRel = str_replace('\\\\','/', substr(\$coreFs, strlen(\$docRoot)));
+    \$coreRel = '/' . ltrim(\$coreRel, '/');
 }
-$coreRel = rtrim($coreRel, '/');
-define('SYSTEC_CORE_URL', $coreRel);
+\$coreRel = rtrim(\$coreRel, '/');
+define('SYSTEC_CORE_URL', \$coreRel);
 
 require SYSTEC_CORE_PATH . '/router.php';
 PHP;
 
-// Template: .htaccess
+            // Template: .htaccess
             $htTpl = "Options -Indexes\n\n" .
 "RewriteEngine On\n\n" .
 "RewriteCond %{REQUEST_FILENAME} -f [OR]\n" .
@@ -221,11 +227,11 @@ PHP;
                 return str_replace(['\\', "'"], ['\\\\', "\\'"], $v);
             };
 
-            $db_host_e   = $esc($db_host);
-            $db_name_e   = $esc($db_name);
-            $db_user_e   = $esc($db_user);
-            $db_pass_e   = $esc($db_pass);
-            $base_url_e  = $esc($base_url_public);
+            $db_host_e  = $esc($db_host);
+            $db_name_e  = $esc($db_name);
+            $db_user_e  = $esc($db_user);
+            $db_pass_e  = $esc($db_pass);
+            $base_url_e = $esc($base_url_public);
 
             $instanceTpl = <<<PHP
 <?php
@@ -252,7 +258,7 @@ return [
 ];
 PHP;
 
-// Escribir archivos
+            // Escribir archivos
             if (!sa_write_file($publicIndex, $indexTpl)) $errors[] = 'No se pudo escribir public/index.php';
             if (!sa_write_file($publicHt, $htTpl)) $errors[] = 'No se pudo escribir public/.htaccess';
             if (!sa_write_file($instancePath, $instanceTpl)) $errors[] = 'No se pudo escribir config/instance.php';
