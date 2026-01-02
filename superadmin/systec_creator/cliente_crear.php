@@ -53,15 +53,39 @@ $base_url_public  = sa_post('base_url_public');
     // Validaciones mínimas
     if ($slug === '' || !sa_valid_slug($slug)) {
         $errors[] = 'Slug inválido. Solo a-z 0-9 _ - (minúsculas, sin espacios).';
-    }
-
-    if ($db_host === '' || $db_name === '' || $db_user === '' || $db_pass === '') {
+    }    if ($db_host === '' || $db_name === '' || $db_user === '' || $db_pass === '') {
         $errors[] = 'DB host/name/user/pass son obligatorios.';
     }
 
+    /*
+     * 🛟 GANCHO FUTURO (OPCIONAL) — BD utf8mb4_unicode_ci
+     * -----------------------------------------------
+     * Contexto (Sofi): el servidor puede tener defaults latin1.
+     * Si a futuro el Creator crea DB/tablas automáticamente:
+     *
+     * 1) Forzar defaults de la DB:
+     *    CREATE DATABASE/ALTER DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+     *
+     * 2) Forzar defaults al crear tablas:
+     *    CREATE TABLE ... DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+     *
+     * Nota: para ejecutar esto se requieren credenciales con privilegios (CREATE/ALTER).
+     *
+     * Ejemplo (descomentando cuando corresponda):
+     *
+     * try {
+     *     // $pdoRoot = sa_pdo_root(); // implementar si se decide (usuario con permisos)
+     *     // $dbSafe = str_replace('`','', $db_name);
+     *     // $pdoRoot->exec("CREATE DATABASE IF NOT EXISTS `{$dbSafe}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+     *     // $pdoRoot->exec("ALTER DATABASE `{$dbSafe}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+     * } catch (Exception $e) {
+     *     // $errors[] = 'No se pudo preparar la BD (utf8mb4).';
+     * }
+     */
+
     // Validar core_version exista físicamente
     $corePath = SYSTEC_ROOT ? (SYSTEC_ROOT . '/_cores/systec/' . $core_version) : '';
-    if (!$corePath || !is_dir($corePath) || !is_file($corePath . '/router.php')) {
+if (!$corePath || !is_dir($corePath) || !is_file($corePath . '/router.php')) {
         $errors[] = 'core_version no existe en el servidor (' . htmlspecialchars($core_version, ENT_QUOTES, 'UTF-8') . ').';
     }    // Calcular base_url_public si no viene
     if ($base_url_public === '') {
