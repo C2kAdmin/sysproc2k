@@ -147,21 +147,43 @@ $editId = (int)($_GET['edit'] ?? 0);
 $edit = null;
 
 if ($editId > 0) {
-    $stmt = $pdo->prepare("SELECT id, titulo, contenido, activo, prioridad, starts_at FROM notices WHERE id = :id LIMIT 1");
-    $stmt->execute([':id' => $editId]);
-    $edit = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$edit) {
+    try {
+        $stmt = $pdo->prepare("SELECT id, titulo, contenido, activo, prioridad, starts_at FROM notices WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $editId]);
+        $edit = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$edit) {
+            $editId = 0;
+            $edit = null;
+            $mensaje_error = $mensaje_error ?: 'Aviso no encontrado.';
+        }
+
+    } catch (Exception $e) {
         $editId = 0;
         $edit = null;
-        $mensaje_error = $mensaje_error ?: 'Aviso no encontrado.';
+
+        if (defined('ENV') && ENV === 'dev') {
+            $mensaje_error = 'Error cargando aviso (edit): ' . $e->getMessage();
+        } else {
+            $mensaje_error = 'Error cargando aviso. Revisa tabla/columnas de notices.';
+        }
     }
 }
-
 // Listado
-$stmt = $pdo->prepare("SELECT id, titulo, activo, prioridad, starts_at FROM notices ORDER BY prioridad DESC, id DESC");
-$stmt->execute();
-$lista = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$lista = [];
+try {
+    $stmt = $pdo->prepare("SELECT id, titulo, activo, prioridad, starts_at FROM notices ORDER BY prioridad DESC, id DESC");
+    $stmt->execute();
+    $lista = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+} catch (Exception $e) {
+    if (defined('ENV') && ENV === 'dev') {
+        $mensaje_error = $mensaje_error ?: ('Error listado notices: ' . $e->getMessage());
+    } else {
+        $mensaje_error = $mensaje_error ?: 'Error consultando notices. Revisa tabla/columnas.';
+    }
+    $lista = [];
+}
 // Móvil/PC
 $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 $isMobile = (bool)preg_match('/Android|iPhone|iPad|iPod|Mobile/i', $ua);
