@@ -35,7 +35,7 @@ $db_name         = '';
 $db_user         = '';
 $db_pass         = '';
 $activo          = 1;
-$core_version    = 'v1.1';
+$core_version    = 'v1.2';
 $base_url_public = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -47,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $db_user          = sa_post('db_user');
     $db_pass          = (string)($_POST['db_pass'] ?? '');
     $activo           = isset($_POST['activo']) ? 1 : 0;
-    $core_version     = sa_post('core_version', 'v1.1');
-    $base_url_public  = sa_post('base_url_public');
+    $core_version     = sa_post('core_version', 'v1.2');
+$base_url_public  = sa_post('base_url_public');
 
     // Validaciones mínimas
     if ($slug === '' || !sa_valid_slug($slug)) {
@@ -133,10 +133,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Template: public/index.php (puente)
             $indexTpl = <<<PHP
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
 /**
  * Puente INSTANCIA -> CORE
  * Cliente: {$slug}
@@ -153,22 +149,36 @@ if (!SYSTEC_INSTANCE_PATH || !is_file(SYSTEC_INSTANCE_PATH)) {
     exit('❌ instance.php no encontrado');
 }
 
+// ✅ display_errors depende de ENV (dev/prod) definido en instance.php
+$__cfg = require SYSTEC_INSTANCE_PATH;
+$__env = strtolower((string)($__cfg['ENV'] ?? 'prod'));
+
+if ($__env === 'dev') {
+    ini_set('display_errors', '1');
+    ini_set('display_startup_errors', '1');
+    error_reporting(E_ALL);
+} else {
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    error_reporting(E_ALL);
+}
+
 // ✅ APP_URL de ESTA instancia (ruta pública donde vive /public/)
-\$base = rtrim(str_replace('\\','/', dirname(\$_SERVER['SCRIPT_NAME'] ?? '')), '/');
-if (\$base === '/' || \$base === '') \$base = '';
-define('SYSTEC_APP_URL', \$base . '/');
+$base = rtrim(str_replace('\\','/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+if ($base === '/' || $base === '') $base = '';
+define('SYSTEC_APP_URL', $base . '/');
 
 // ✅ CORE_URL (ruta web al CORE) para cargar assets directo desde el CORE
-\$docRoot = realpath(\$_SERVER['DOCUMENT_ROOT'] ?? '');
-\$coreFs  = realpath(SYSTEC_CORE_PATH);
+$docRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
+$coreFs  = realpath(SYSTEC_CORE_PATH);
 
-\$coreRel = '';
-if (\$docRoot && \$coreFs && strpos(\$coreFs, \$docRoot) === 0) {
-    \$coreRel = str_replace('\\','/', substr(\$coreFs, strlen(\$docRoot)));
-    \$coreRel = '/' . ltrim(\$coreRel, '/');
+$coreRel = '';
+if ($docRoot && $coreFs && strpos($coreFs, $docRoot) === 0) {
+    $coreRel = str_replace('\\','/', substr($coreFs, strlen($docRoot)));
+    $coreRel = '/' . ltrim($coreRel, '/');
 }
-\$coreRel = rtrim(\$coreRel, '/');
-define('SYSTEC_CORE_URL', \$coreRel);
+$coreRel = rtrim($coreRel, '/');
+define('SYSTEC_CORE_URL', $coreRel);
 
 require SYSTEC_CORE_PATH . '/router.php';
 PHP;
@@ -196,6 +206,9 @@ PHP;
 <?php
 return [
     'ENV' => 'dev',
+
+    // IMPORTANT: el CORE v1.2 usa SYSTEC_VERSION para resolver versión (si no viene cae a v1.1)
+    'SYSTEC_VERSION' => '{$core_version}',
 
     // APP_URL lo toma del puente (SYSTEC_APP_URL).
     // IMPORTANTE: mantenerlo como PATH (sin scheme/host) para compatibilidad v1.1
