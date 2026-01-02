@@ -27,6 +27,83 @@ function sa_mkdir(string $path): bool {
     return mkdir($path, 0755, true);
 }
 
+/**
+ * Crear usuario inicial SUPER_ADMIN en la DB del cliente (opcional).
+ * - No rompe la creación del cliente si falla.
+ */
+function sa_try_create_initial_super_admin(
+    string $db_host,
+    string $db_name,
+    string $db_user,
+    string $db_pass,
+    string $nombre,
+    string $usuario,
+    string $password,
+    string $email
+): array {
+    try {
+        $pdoClient = new PDO(
+            "mysql:host={$db_host};dbname={$db_name};charset=utf8mb4",
+            $db_user,
+            $db_pass,
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]
+        );
+    } catch (Exception $e) {
+        return ['ok' => false, 'msg' => 'No se pudo conectar a la DB del cliente.'];
+    }
+
+    try {
+        // Verificar tabla usuarios
+        $st = $pdoClient->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'usuarios'
+        ");
+        $st->execute([':db' => $db_name]);
+        $hasTable = (int)$st->fetchColumn();
+
+        if ($hasTable <= 0) {
+            return ['ok' => false, 'msg' => 'La tabla usuarios no existe en la DB del cliente.'];
+        }
+
+        // Duplicado usuario
+        $st = $pdoClient->prepare("SELECT id FROM usuarios WHERE usuario = :u LIMIT 1");
+        $st->execute([':u' => $usuario]);
+        if ($st->fetch()) {
+            return ['ok' => false, 'msg' => 'El usuario inicial ya existe.'];
+        }
+
+        // Duplicado email
+        $st = $pdoClient->prepare("SELECT id FROM usuarios WHERE email = :e LIMIT 1");
+        $st->execute([':e' => $email]);
+        if ($st->fetch()) {
+            return ['ok' => false, 'msg' => 'El email ya está en uso en esta DB.'];
+        }
+
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+
+        // Insert: rol SUPER_ADMIN + is_super_admin=1
+        $st = $pdoClient->prepare("
+            INSERT INTO usuarios (nombre, email, usuario, password_hash, rol, activo, is_super_admin)
+            VALUES (:n, :e, :u, :ph, 'SUPER_ADMIN', 1, 1)
+        ");
+        $st->execute([
+            ':n'  => $nombre,
+            ':e'  => $email,
+            ':u'  => $usuario,
+            ':ph' => $hash,
+        ]);
+
+        return ['ok' => true, 'msg' => 'Usuario SUPER_ADMIN creado.'];
+
+    } catch (Exception $e) {
+        return ['ok' => false, 'msg' => 'Fallo al crear el usuario inicial.'];
+    }
+}
+
 // Defaults
 $slug             = '';
 $nombre_comercial = '';
@@ -37,6 +114,13 @@ $db_pass          = '';
 $activo           = 1;
 $core_version     = 'v1.2';
 $base_url_public  = '';
+
+// Usuario inicial (opcional)
+$crear_admin   = 1;
+$admin_nombre  = '';
+$admin_email   = '';
+$admin_usuario = 'admin';
+$admin_pass    = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -50,6 +134,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $core_version     = sa_post('core_version', 'v1.2');
     $base_url_public  = sa_post('base_url_public');
 
+    // Usuario inicial (opcional)
+    $crear_admin   = isset($_POST['crear_admin']) ? 1 : 0;
+    $admin_nombre  = sa_post('admin_nombre');
+    $admin_email   = sa_post('admin_email');
+    $admin_usuario = sa_post('admin_usuario', 'admin');
+    $admin_pass    = (string)($_POST['admin_pass'] ?? '');
+
     // Validaciones mínimas
     if ($slug === '' || !sa_valid_slug($slug)) {
         $errors[] = 'Slug inválido. Solo a-z 0-9 _ - (minúsculas, sin espacios).';
@@ -59,30 +150,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'DB host/name/user/pass son obligatorios.';
     }
 
+    // Validación usuario inicial
+    if ($crear_admin === 1) {
+        if (trim($admin_nombre) === '' || trim($admin_usuario) === '' || trim($admin_pass) === '') {
+            $errors[] = 'Usuario inicial: nombre/usuario/contraseña son obligatorios.';
+        } elseif (strlen($admin_pass) < 6) {
+            $errors[] = 'Usuario inicial: contraseña mínima 6 caracteres.';
+        }
+
+        if (trim($admin_email) === '') {
+            $errors[] = 'Usuario inicial: email es obligatorio.';
+        } elseif (!filter_var($admin_email, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'Usuario inicial: email no es válido.';
+        }
+    }
+
     /*
      * 🛟 GANCHO FUTURO (OPCIONAL) — BD utf8mb4_unicode_ci
      * -----------------------------------------------
      * Contexto (Sofi): el servidor puede tener defaults latin1.
      * Si a futuro el Creator crea DB/tablas automáticamente:
-     *
-     * 1) Forzar defaults de la DB:
-     *    CREATE DATABASE/ALTER DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-     *
-     * 2) Forzar defaults al crear tablas:
-     *    CREATE TABLE ... DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-     *
-     * Nota: para ejecutar esto se requieren credenciales con privilegios (CREATE/ALTER).
-     *
-     * Ejemplo (descomentando cuando corresponda):
-     *
-     * try {
-     *     // $pdoRoot = sa_pdo_root(); // implementar si se decide (usuario con permisos)
-     *     // $dbSafe = str_replace('`','', $db_name);
-     *     // $pdoRoot->exec("CREATE DATABASE IF NOT EXISTS `{$dbSafe}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-     *     // $pdoRoot->exec("ALTER DATABASE `{$dbSafe}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-     * } catch (Exception $e) {
-     *     // $errors[] = 'No se pudo preparar la BD (utf8mb4).';
-     * }
+     * - Forzar defaults DB + CREATE TABLE ... DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci
      */
 
     // Validar core_version exista físicamente
@@ -139,7 +227,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $instancePath = $configDir . '/instance.php';
         $storagePath  = $storageDir;
-        $logsPath     = $storageDir . '/logs';
 
         $publicIndex  = $publicDir . '/index.php';
         $publicHt     = $publicDir . '/.htaccess';
@@ -286,7 +373,31 @@ PHP;
                         ':dp'    => $db_pass,
                     ]);
 
-                    sa_flash_set('clientes', 'Cliente creado: ' . $slug, 'success');
+                    // Crear usuario inicial SUPER_ADMIN (opcional)
+                    $note = '';
+                    $type = 'success';
+
+                    if ($crear_admin === 1) {
+                        $r = sa_try_create_initial_super_admin(
+                            $db_host,
+                            $db_name,
+                            $db_user,
+                            $db_pass,
+                            $admin_nombre,
+                            $admin_usuario,
+                            $admin_pass,
+                            $admin_email
+                        );
+
+                        if (!$r['ok']) {
+                            $type = 'warning';
+                            $note = ' | Cliente OK, pero admin NO: ' . $r['msg'];
+                        } else {
+                            $note = ' | Admin OK: ' . $r['msg'];
+                        }
+                    }
+
+                    sa_flash_set('clientes', 'Cliente creado: ' . $slug . $note, $type);
                     header('Location: ' . sa_url('/clientes.php'));
                     exit;
 
@@ -380,6 +491,38 @@ require_once __DIR__ . '/_layout/sidebar.php';
               <input type="checkbox" name="activo" value="1" <?php echo ($activo===1)?'checked':''; ?>>
               Cliente activo
             </label>
+          </div>
+
+          <hr>
+
+          <h5 class="mb-2">Usuario inicial (opcional)</h5>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" name="crear_admin" value="1" <?php echo ($crear_admin===1)?'checked':''; ?>>
+              Crear usuario inicial <strong>SUPER_ADMIN</strong>
+            </label>
+            <div class="text-muted small">
+              Si la tabla <code>usuarios</code> no existe aún en la DB del cliente, el cliente se crea igual y te avisa.
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-md-4">
+              <label>Nombre *</label>
+              <input type="text" name="admin_nombre" class="form-control" value="<?php echo htmlspecialchars($admin_nombre, ENT_QUOTES, 'UTF-8'); ?>">
+            </div>
+            <div class="form-group col-md-4">
+              <label>Email *</label>
+              <input type="text" name="admin_email" class="form-control" value="<?php echo htmlspecialchars($admin_email, ENT_QUOTES, 'UTF-8'); ?>">
+            </div>
+            <div class="form-group col-md-2">
+              <label>Usuario *</label>
+              <input type="text" name="admin_usuario" class="form-control" value="<?php echo htmlspecialchars($admin_usuario, ENT_QUOTES, 'UTF-8'); ?>">
+            </div>
+            <div class="form-group col-md-2">
+              <label>Contraseña *</label>
+              <input type="password" name="admin_pass" class="form-control" value="">
+            </div>
           </div>
 
           <button class="btn btn-primary" type="submit">Crear cliente</button>
