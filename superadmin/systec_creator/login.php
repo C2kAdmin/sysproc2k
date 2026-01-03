@@ -9,34 +9,47 @@ if (isset($_SESSION['super_admin']) && $_SESSION['super_admin'] === true) {
 }
 
 $error = '';
+$login = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    $email = strtolower(sa_post('email'));
+    $login = strtolower(trim(sa_post('login')));
     $pass  = (string)($_POST['pass'] ?? '');
 
-    if ($email === '' || $pass === '') {
-        $error = 'Completa email y contraseña.';
+    if ($login === '' || $pass === '') {
+        $error = 'Completa email/usuario y contraseña.';
     } else {
         try {
             $pdo = sa_pdo();
-            $stmt = $pdo->prepare("SELECT id, email, pass_hash, role, activo FROM superadmin_users WHERE email = :email LIMIT 1");
-            $stmt->execute([':email' => $email]);
+
+            $isEmail = (strpos($login, '@') !== false);
+
+            if ($isEmail) {
+                $stmt = $pdo->prepare("SELECT id, username, email, password_hash, activo FROM superadmin_users WHERE email = :l LIMIT 1");
+            } else {
+                $stmt = $pdo->prepare("SELECT id, username, email, password_hash, activo FROM superadmin_users WHERE username = :l LIMIT 1");
+            }
+
+            $stmt->execute([':l' => $login]);
             $u = $stmt->fetch();
 
-            if (!$u || (int)$u['activo'] !== 1 || !password_verify($pass, (string)$u['pass_hash'])) {
+            if (
+                !$u ||
+                (int)$u['activo'] !== 1 ||
+                !password_verify($pass, (string)$u['password_hash'])
+            ) {
                 $error = 'Credenciales inválidas.';
             } else {
-                $_SESSION['super_admin']   = true;
-                $_SESSION['sa_user_id']    = (int)$u['id'];
-                $_SESSION['sa_user_email'] = (string)$u['email'];
-                $_SESSION['sa_user_role']  = (string)($u['role'] ?? '');
+                $_SESSION['super_admin']      = true;
+                $_SESSION['sa_user_id']       = (int)$u['id'];
+                $_SESSION['sa_user_email']    = (string)$u['email'];
+                $_SESSION['sa_user_username'] = (string)$u['username'];
 
                 header('Location: ' . sa_url('/clientes.php'));
                 exit;
             }
         } catch (Exception $e) {
-            $error = 'Error al conectar a BD master. Revisa credenciales en _config/config.php';
+            $error = 'Error al conectar a BD central. Revisa credenciales en _config/config.php';
         }
     }
 }
@@ -62,8 +75,15 @@ require_once __DIR__ . '/_layout/header.php';
 
           <form method="post" autocomplete="off">
             <div class="form-group">
-              <label>Email</label>
-              <input type="email" name="email" class="form-control" value="<?php echo htmlspecialchars((string)($email ?? ''), ENT_QUOTES, 'UTF-8'); ?>" required>
+              <label>Email o usuario</label>
+              <input
+                type="text"
+                name="login"
+                class="form-control"
+                placeholder="admin@dominio.com o admin"
+                value="<?php echo htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>"
+                required
+              >
             </div>
             <div class="form-group">
               <label>Contraseña</label>
@@ -74,7 +94,7 @@ require_once __DIR__ . '/_layout/header.php';
           </form>
 
           <div class="text-muted small mt-3">
-            Si no existe usuario aún, créalo en la BD master (tabla <code>superadmin_users</code>).
+            Si no existe usuario aún, créalo con el seed (primer setup).
           </div>
         </div>
       </div>

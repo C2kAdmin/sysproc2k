@@ -42,7 +42,6 @@ define('SYSTEC_CORES_ROOT', SYSTEC_ROOT ? (SYSTEC_ROOT . '/_cores') : '');
 // ----------------------------------------
 // ✅ BD CENTRAL DEL CREATOR (Auth + Registry)
 // ----------------------------------------
-// ⚠️ Si tu PASS NO lleva punto final, quítalo.
 define('MASTER_DB_HOST', 'localhost');
 define('MASTER_DB_NAME', 'ckcl_superadmin');
 define('MASTER_DB_USER', 'ckcl_superadmin');
