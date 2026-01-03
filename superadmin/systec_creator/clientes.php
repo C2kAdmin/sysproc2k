@@ -54,18 +54,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_id'], $_POST['
     exit;
 }
 
+// Buscar (GET)
+$q = trim((string)($_GET['q'] ?? ''));
+
 // 2️⃣ Traer clientes desde BD master
 $clientes = [];
 try {
     $pdo = sa_pdo();
-    $st = $pdo->query("SELECT * FROM systec_clientes ORDER BY created_at DESC, id DESC");
-    $clientes = $st->fetchAll() ?: [];
+
+    if ($q !== '') {
+        $st = $pdo->prepare("
+            SELECT *
+            FROM systec_clientes
+            WHERE slug LIKE :q
+               OR nombre_comercial LIKE :q
+               OR db_name LIKE :q
+               OR core_version LIKE :q
+            ORDER BY created_at DESC, id DESC
+        ");
+        $st->execute([':q' => '%' . $q . '%']);
+        $clientes = $st->fetchAll() ?: [];
+    } else {
+        $st = $pdo->query("SELECT * FROM systec_clientes ORDER BY created_at DESC, id DESC");
+        $clientes = $st->fetchAll() ?: [];
+    }
+
 } catch (Exception $e) {
     $clientes = [];
     sa_flash_set('clientes', 'Error al leer BD master. Revisa credenciales en _config/config.php', 'danger');
 }
 
 $flash = sa_flash_get('clientes');
+
+$total = count($clientes);
+$activos = 0;
+foreach ($clientes as $c) {
+    if ((int)($c['activo'] ?? 0) === 1) $activos++;
+}
 
 // 3️⃣ Layout propio
 require_once __DIR__ . '/_layout/header.php';
@@ -81,7 +106,10 @@ require_once __DIR__ . '/_layout/sidebar.php';
   <div class="sa-content">
 
     <div class="d-flex align-items-center justify-content-between mb-3">
-      <h4 class="mb-0">Clientes</h4>
+      <div>
+        <h4 class="mb-0">Clientes</h4>
+        <div class="text-muted small">Total: <?php echo (int)$total; ?> | Activos: <?php echo (int)$activos; ?></div>
+      </div>
       <a class="btn btn-sm btn-primary" href="<?php echo sa_url('/cliente_crear.php'); ?>">+ Crear cliente</a>
     </div>
 
@@ -90,6 +118,21 @@ require_once __DIR__ . '/_layout/sidebar.php';
         <?php echo htmlspecialchars($flash['msg'], ENT_QUOTES, 'UTF-8'); ?>
       </div>
     <?php endif; ?>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <form method="get" class="form-inline" autocomplete="off">
+          <label class="mr-2 text-muted">Buscar</label>
+          <input type="text" name="q" class="form-control mr-2" style="min-width:260px"
+                 value="<?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?>"
+                 placeholder="slug / nombre / db / core">
+          <button class="btn btn-outline-secondary mr-2" type="submit">Filtrar</button>
+          <?php if ($q !== ''): ?>
+            <a class="btn btn-light" href="<?php echo sa_url('/clientes.php'); ?>">Limpiar</a>
+          <?php endif; ?>
+        </form>
+      </div>
+    </div>
 
     <div class="card">
       <div class="card-body p-0">
@@ -103,27 +146,36 @@ require_once __DIR__ . '/_layout/sidebar.php';
               <th>Activo</th>
               <th>URL</th>
               <th>FS</th>
+              <th>Creado</th>
               <th class="text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
             <?php if (empty($clientes)): ?>
               <tr>
-                <td colspan="8" class="p-3 text-muted">Sin clientes registrados todavía.</td>
+                <td colspan="9" class="p-3 text-muted">Sin clientes registrados todavía.</td>
               </tr>
             <?php else: ?>
               <?php foreach ($clientes as $c): ?>
                 <?php
                   $instanceOk = !empty($c['instance_path']) && is_file((string)$c['instance_path']);
                   $storageOk  = !empty($c['storage_path'])  && is_dir((string)$c['storage_path']);
-                  $editUrl    = sa_url('/cliente_editar.php?id=' . (int)$c['id']);
-                  $delUrl     = sa_url('/cliente_eliminar.php?id=' . (int)$c['id']);
+                  $fsOk = ($instanceOk && $storageOk);
+
+                  $editUrl = sa_url('/cliente_editar.php?id=' . (int)$c['id']);
+                  $delUrl  = sa_url('/cliente_eliminar.php?id=' . (int)$c['id']);
+                  $openUrl = (string)($c['base_url_public'] ?? '');
+                  $created = (string)($c['created_at'] ?? '');
                 ?>
                 <tr>
                   <td><?php echo (int)$c['id']; ?></td>
+
                   <td><code><?php echo htmlspecialchars((string)$c['slug'], ENT_QUOTES, 'UTF-8'); ?></code></td>
+
                   <td><?php echo htmlspecialchars((string)($c['nombre_comercial'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+
                   <td><?php echo htmlspecialchars((string)($c['core_version'] ?? 'v1.1'), ENT_QUOTES, 'UTF-8'); ?></td>
+
                   <td>
                     <?php if ((int)$c['activo'] === 1): ?>
                       <span class="badge badge-success">Sí</span>
@@ -131,18 +183,27 @@ require_once __DIR__ . '/_layout/sidebar.php';
                       <span class="badge badge-secondary">No</span>
                     <?php endif; ?>
                   </td>
+
                   <td>
-                    <?php if (!empty($c['base_url_public'])): ?>
-                      <a href="<?php echo htmlspecialchars((string)$c['base_url_public'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank">Abrir</a>
+                    <?php if ($openUrl !== ''): ?>
+                      <a href="<?php echo htmlspecialchars($openUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">Abrir</a>
+                    <?php else: ?>
+                      <span class="text-muted small">—</span>
                     <?php endif; ?>
                   </td>
+
                   <td>
-                    <?php if ($instanceOk && $storageOk): ?>
+                    <?php if ($fsOk): ?>
                       <span class="badge badge-success">OK</span>
                     <?php else: ?>
                       <span class="badge badge-warning">Revisar</span>
                     <?php endif; ?>
                   </td>
+
+                  <td>
+                    <?php echo htmlspecialchars($created !== '' ? $created : '—', ENT_QUOTES, 'UTF-8'); ?>
+                  </td>
+
                   <td class="text-right">
                     <a class="btn btn-sm btn-outline-primary" href="<?php echo htmlspecialchars($editUrl, ENT_QUOTES, 'UTF-8'); ?>">Editar</a>
 

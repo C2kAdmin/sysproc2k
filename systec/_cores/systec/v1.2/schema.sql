@@ -1,11 +1,15 @@
 -- =========================================================
--- SysTec v1.2 — Schema base
--- SCHEMA_VERSION: 2026-01-03-01
+-- SysTec v1.2 — Schema base (mejorado)
+-- SCHEMA_VERSION: 2026-01-03-02
 -- Ubicación: /_cores/systec/v1.2/_db/schema.sql
 -- Nota: No incluye CREATE DATABASE / USE
 -- =========================================================
 
 SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
+-- Para creación ordenada de FKs (no afecta si no hay FKs aún)
+SET FOREIGN_KEY_CHECKS = 0;
 
 -- -------------------------
 -- schema_migrations (tracking)
@@ -18,8 +22,10 @@ CREATE TABLE IF NOT EXISTS `schema_migrations` (
   `applied_by` VARCHAR(60) NULL DEFAULT NULL,
   `notes` VARCHAR(255) NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_schema_version_hash` (`schema_version`, `schema_hash`),
   KEY `idx_schema_version` (`schema_version`),
-  KEY `idx_schema_hash` (`schema_hash`)
+  KEY `idx_schema_hash` (`schema_hash`),
+  KEY `idx_schema_applied_at` (`applied_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -41,7 +47,8 @@ CREATE TABLE IF NOT EXISTS `usuarios` (
   UNIQUE KEY `uq_usuarios_usuario` (`usuario`),
   UNIQUE KEY `uq_usuarios_email` (`email`),
   KEY `idx_usuarios_rol` (`rol`),
-  KEY `idx_usuarios_activo` (`activo`)
+  KEY `idx_usuarios_activo` (`activo`),
+  KEY `idx_usuarios_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -57,8 +64,11 @@ CREATE TABLE IF NOT EXISTS `clientes` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_clientes_rut` (`rut`),
   KEY `idx_clientes_nombre` (`nombre`),
-  KEY `idx_clientes_rut` (`rut`)
+  KEY `idx_clientes_rut` (`rut`),
+  KEY `idx_clientes_email` (`email`),
+  KEY `idx_clientes_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -79,7 +89,11 @@ CREATE TABLE IF NOT EXISTS `equipos` (
   PRIMARY KEY (`id`),
   KEY `idx_equipos_cliente` (`cliente_id`),
   KEY `idx_equipos_imei` (`imei`),
-  KEY `idx_equipos_serie` (`serie`)
+  KEY `idx_equipos_serie` (`serie`),
+  KEY `idx_equipos_marca_modelo` (`marca`, `modelo`),
+  CONSTRAINT `fk_equipos_cliente`
+    FOREIGN KEY (`cliente_id`) REFERENCES `clientes`(`id`)
+    ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -113,9 +127,28 @@ CREATE TABLE IF NOT EXISTS `ordenes` (
 
   PRIMARY KEY (`id`),
   KEY `idx_ordenes_estado_actual` (`estado_actual`),
+  KEY `idx_ordenes_prioridad` (`prioridad`),
   KEY `idx_ordenes_fecha_ingreso` (`fecha_ingreso`),
   KEY `idx_ordenes_cliente` (`cliente_id`),
-  KEY `idx_ordenes_equipo` (`equipo_id`)
+  KEY `idx_ordenes_equipo` (`equipo_id`),
+  KEY `idx_ordenes_created_at` (`created_at`),
+  KEY `idx_ordenes_cliente_fecha` (`cliente_id`, `fecha_ingreso`),
+
+  CONSTRAINT `fk_ordenes_cliente`
+    FOREIGN KEY (`cliente_id`) REFERENCES `clientes`(`id`)
+    ON UPDATE CASCADE ON DELETE SET NULL,
+
+  CONSTRAINT `fk_ordenes_equipo`
+    FOREIGN KEY (`equipo_id`) REFERENCES `equipos`(`id`)
+    ON UPDATE CASCADE ON DELETE SET NULL,
+
+  CONSTRAINT `fk_ordenes_created_by`
+    FOREIGN KEY (`created_by`) REFERENCES `usuarios`(`id`)
+    ON UPDATE CASCADE ON DELETE SET NULL,
+
+  CONSTRAINT `fk_ordenes_updated_by`
+    FOREIGN KEY (`updated_by`) REFERENCES `usuarios`(`id`)
+    ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -130,7 +163,14 @@ CREATE TABLE IF NOT EXISTS `ordenes_eventos` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_eventos_orden` (`orden_id`),
-  KEY `idx_eventos_usuario` (`usuario_id`)
+  KEY `idx_eventos_usuario` (`usuario_id`),
+  KEY `idx_eventos_created_at` (`created_at`),
+  CONSTRAINT `fk_eventos_orden`
+    FOREIGN KEY (`orden_id`) REFERENCES `ordenes`(`id`)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT `fk_eventos_usuario`
+    FOREIGN KEY (`usuario_id`) REFERENCES `usuarios`(`id`)
+    ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -144,7 +184,12 @@ CREATE TABLE IF NOT EXISTS `evidencias` (
   `descripcion` VARCHAR(255) NULL DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_evidencias_orden` (`orden_id`)
+  KEY `idx_evidencias_orden` (`orden_id`),
+  KEY `idx_evidencias_tipo` (`tipo`),
+  KEY `idx_evidencias_created_at` (`created_at`),
+  CONSTRAINT `fk_evidencias_orden`
+    FOREIGN KEY (`orden_id`) REFERENCES `ordenes`(`id`)
+    ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -157,7 +202,11 @@ CREATE TABLE IF NOT EXISTS `firmas` (
   `nombre` VARCHAR(180) NULL DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_firmas_orden` (`orden_id`)
+  KEY `idx_firmas_orden` (`orden_id`),
+  KEY `idx_firmas_created_at` (`created_at`),
+  CONSTRAINT `fk_firmas_orden`
+    FOREIGN KEY (`orden_id`) REFERENCES `ordenes`(`id`)
+    ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------
@@ -170,5 +219,8 @@ CREATE TABLE IF NOT EXISTS `parametros` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_parametros_clave` (`clave`)
+  UNIQUE KEY `uq_parametros_clave` (`clave`),
+  KEY `idx_parametros_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;

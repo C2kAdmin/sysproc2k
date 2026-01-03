@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // superadmin/systec_creator/cliente_eliminar.php
-// Eliminación SEGURA: registro master + (opcional) carpeta FS + (opcional) vaciar tablas DB.
+// Eliminación SEGURA: registro master + (opcional) carpeta FS + (opcional) vaciar tablas DB + (opcional) DROP DB.
 
 require_once __DIR__ . '/_config/config.php';
 require_once __DIR__ . '/_config/auth.php';
@@ -30,6 +30,30 @@ if (!function_exists('sa_csrf_ok')) {
     }
 }
 
+/* =========================
+   LOG (para auditoría)
+   ========================= */
+function sa_admin_delete_log(string $line): void
+{
+    $dir = __DIR__ . '/_logs';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+
+    $file = $dir . '/delete_' . date('Ymd') . '.log';
+    $ts = date('Y-m-d H:i:s');
+    @file_put_contents($file, "[{$ts}] {$line}\n", FILE_APPEND);
+}
+
+function sa_sql_ident(string $ident): string
+{
+    $ident = str_replace('`', '', $ident);
+    return '`' . $ident . '`';
+}
+
+function sa_valid_slug(string $slug): bool
+{
+    return (bool)preg_match('/^[a-z0-9_-]+$/', $slug);
+}
+
 function sa_rrmdir(string $dir): bool
 {
     if (!is_dir($dir)) return true;
@@ -41,10 +65,13 @@ function sa_rrmdir(string $dir): bool
 
     foreach ($items as $item) {
         /** @var SplFileInfo $item */
+        $path = $item->getRealPath();
+        if (!$path) continue;
+
         if ($item->isDir()) {
-            @rmdir($item->getRealPath());
+            @rmdir($path);
         } else {
-            @unlink($item->getRealPath());
+            @unlink($path);
         }
     }
 
@@ -56,9 +83,13 @@ function sa_safe_path_under(string $path, string $root): bool
     $rp = realpath($path);
     $rr = realpath($root);
     if (!$rp || !$rr) return false;
-    $rr = rtrim(str_replace('\\','/',$rr), '/') . '/';
-    $rp = str_replace('\\','/',$rp);
-    return strpos($rp . (is_dir($rp) ? '/' : ''), $rr) === 0;
+
+    $rr = rtrim(str_replace('\\', '/', $rr), '/') . '/';
+    $rp = str_replace('\\', '/', $rp);
+
+    // si es dir, forzamos slash final para evitar “prefijos tramposos”
+    $rpCheck = $rp . (is_dir($rp) ? '/' : '');
+    return strpos($rpCheck, $rr) === 0;
 }
 
 function sa_client_pdo_no_db(string $db_host, string $db_user, string $db_pass): PDO
@@ -116,6 +147,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($errors) && $client) {
         $do_drop = isset($_POST['drop_db']) ? 1 : 0;        // DROP DATABASE (si permisos)
         $do_row  = isset($_POST['delete_master']) ? 1 : 0;  // borrar registro en master
 
+        // Si marca DROP DB, no tiene sentido “wipe” también
+        if ($do_drop) $do_wipe = 0;
+
+        if ($slug === '' || !sa_valid_slug($slug)) {
+            $errors[] = 'Slug inválido (seguridad). No se puede operar.';
+        }
+
         if ($confirm !== $slug) {
             $errors[] = 'Confirmación inválida. Debes escribir exactamente el slug del cliente.';
         }
@@ -136,16 +174,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($errors) && $client) {
             // FS root esperado del cliente (por slug)
             $clientRoot = (SYSTEC_CLIENTS_ROOT ? (SYSTEC_CLIENTS_ROOT . '/' . $slug) : '');
 
+            sa_admin_delete_log("START id={$id} slug={$slug} actions: fs={$do_fs} wipe={$do_wipe} drop={$do_drop} master={$do_row}");
+
             // 2.1) Borrar FS (si corresponde)
             if ($do_fs && $clientRoot !== '') {
                 if (!is_dir($clientRoot)) {
-                    // ya no existe -> OK
+                    sa_admin_delete_log("FS: already missing => {$clientRoot}");
                 } else {
                     if (!sa_safe_path_under($clientRoot, (string)SYSTEC_CLIENTS_ROOT)) {
                         $errors[] = 'Ruta FS no segura (fuera de _clients). Se cancela borrado de carpeta.';
+                        sa_admin_delete_log("FS: unsafe path => {$clientRoot}");
                     } else {
                         if (!sa_rrmdir($clientRoot)) {
                             $errors[] = 'No se pudo borrar la carpeta del cliente (permisos).';
+                            sa_admin_delete_log("FS: delete FAILED => {$clientRoot}");
+                        } else {
+                            sa_admin_delete_log("FS: delete OK => {$clientRoot}");
                         }
                     }
                 }
@@ -156,22 +200,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($errors) && $client) {
 
                 if ($db_name === '' || $db_user === '' || $db_pass === '') {
                     $errors[] = 'No hay credenciales DB suficientes en el registro master para borrar DB/tablas.';
+                    sa_admin_delete_log("DB: missing credentials => db_name={$db_name}");
                 } else {
                     try {
                         if ($do_drop) {
                             // DROP DATABASE requiere conexión sin DB y privilegios
                             $pdoNoDb = sa_client_pdo_no_db($db_host, $db_user, $db_pass);
-                            $pdoNoDb->exec("DROP DATABASE " . '`' . str_replace('`','',$db_name) . '`');
+                            $pdoNoDb->exec("DROP DATABASE IF EXISTS " . sa_sql_ident($db_name));
+                            sa_admin_delete_log("DB: DROP DATABASE OK => {$db_name}");
                         } elseif ($do_wipe) {
                             $pdoClient = sa_client_pdo($db_host, $db_name, $db_user, $db_pass);
+
+                            // IMPORTANTE: bajar FK checks para dropear todo sin pelearse con relaciones
+                            $pdoClient->exec("SET FOREIGN_KEY_CHECKS=0");
+
                             $tables = $pdoClient->query("SHOW TABLES")->fetchAll(PDO::FETCH_NUM);
                             foreach ($tables as $t) {
-                                $tbl = (string)$t[0];
-                                $pdoClient->exec("DROP TABLE IF EXISTS `" . str_replace('`','',$tbl) . "`");
+                                $tbl = (string)($t[0] ?? '');
+                                if ($tbl === '') continue;
+                                $pdoClient->exec("DROP TABLE IF EXISTS " . sa_sql_ident($tbl));
                             }
+
+                            $pdoClient->exec("SET FOREIGN_KEY_CHECKS=1");
+                            sa_admin_delete_log("DB: WIPE tables OK => {$db_name} (count=" . count($tables) . ")");
                         }
                     } catch (Exception $e) {
                         $errors[] = 'No se pudo borrar DB/tablas (probable falta de permisos en hosting).';
+                        sa_admin_delete_log("DB: FAILED => " . $e->getMessage());
                     }
                 }
             }
@@ -182,15 +237,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($errors) && $client) {
                     $pdo = sa_pdo();
                     $st = $pdo->prepare("DELETE FROM systec_clientes WHERE id = :id LIMIT 1");
                     $st->execute([':id' => (int)$client['id']]);
+                    sa_admin_delete_log("MASTER: delete OK id=" . (int)$client['id']);
                 } catch (Exception $e) {
                     $errors[] = 'No se pudo borrar el registro en BD master.';
+                    sa_admin_delete_log("MASTER: delete FAILED => " . $e->getMessage());
                 }
             }
 
             if (empty($errors)) {
+                sa_admin_delete_log("DONE OK slug={$slug}");
                 sa_flash_set('clientes', "Cliente eliminado/limpiado: {$slug}", 'success');
                 header('Location: ' . sa_url('/clientes.php'));
                 exit;
+            } else {
+                sa_admin_delete_log("DONE WITH ERRORS slug={$slug} => " . implode(' | ', $errors));
             }
         }
     }
@@ -268,7 +328,7 @@ require_once __DIR__ . '/_layout/sidebar.php';
               </label>
 
               <div class="text-muted small mt-2">
-                Si ya borraste carpeta/tablas a mano, puedes dejar solo “Eliminar registro en BD master”.
+                Log de auditoría: <code>/superadmin/systec_creator/_logs/delete_YYYYmmdd.log</code>
               </div>
             </div>
 
