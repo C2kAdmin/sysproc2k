@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-// 1️⃣ Bootstrap SuperAdmin (NO CORE)
+// 1) Bootstrap SuperAdmin (NO CORE)
 require_once __DIR__ . '/_config/config.php';
 require_once __DIR__ . '/_config/auth.php';
 
@@ -12,6 +12,11 @@ $okMsg  = '';
 
 function sa_valid_slug(string $slug): bool {
     return (bool)preg_match('/^[a-z0-9_-]+$/', $slug);
+}
+
+function sa_valid_username(string $u): bool {
+    // permitido: letras/números + _ - . (sin espacios)
+    return (bool)preg_match('/^[a-zA-Z0-9_.-]+$/', $u);
 }
 
 function sa_write_file(string $path, string $content): bool {
@@ -29,7 +34,7 @@ function sa_mkdir(string $path): bool {
 
 /**
  * Crear usuario inicial SUPER_ADMIN en la DB del cliente (opcional).
- * - No rompe la creación del cliente si falla.
+ * - NO rompe la creación del cliente si falla.
  */
 function sa_try_create_initial_super_admin(
     string $db_host,
@@ -41,14 +46,20 @@ function sa_try_create_initial_super_admin(
     string $password,
     string $email
 ): array {
+    // Normalizar
+    $usuario = trim($usuario);
+    $email   = strtolower(trim($email));
+    $nombre  = trim($nombre);
+
     try {
         $pdoClient = new PDO(
             "mysql:host={$db_host};dbname={$db_name};charset=utf8mb4",
             $db_user,
             $db_pass,
             [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false,
             ]
         );
     } catch (Exception $e) {
@@ -56,48 +67,51 @@ function sa_try_create_initial_super_admin(
     }
 
     try {
-        // Verificar tabla usuarios
-        $st = $pdoClient->prepare("
-            SELECT COUNT(*)
-            FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'usuarios'
-        ");
-        $st->execute([':db' => $db_name]);
-        $hasTable = (int)$st->fetchColumn();
+        // 1) Verificar tabla usuarios (más compatible que information_schema)
+        $st = $pdoClient->prepare("SHOW TABLES LIKE 'usuarios'");
+        $st->execute();
+        $hasTable = (bool)$st->fetchColumn();
 
-        if ($hasTable <= 0) {
-            return ['ok' => false, 'msg' => 'La tabla usuarios no existe en la DB del cliente.'];
+        if (!$hasTable) {
+            return ['ok' => false, 'msg' => "La tabla 'usuarios' no existe en la DB del cliente."];
         }
 
-        // Duplicado usuario
-        $st = $pdoClient->prepare("SELECT id FROM usuarios WHERE usuario = :u LIMIT 1");
-        $st->execute([':u' => $usuario]);
+        // 2) Verificar columnas mínimas esperadas
+        $cols = $pdoClient->query("SHOW COLUMNS FROM usuarios")->fetchAll();
+        $fields = [];
+        foreach ($cols as $c) {
+            $fields[(string)$c['Field']] = true;
+        }
+
+        $required = ['nombre','usuario','email','password_hash','rol','activo','is_super_admin'];
+        foreach ($required as $r) {
+            if (!isset($fields[$r])) {
+                return ['ok' => false, 'msg' => "Tabla usuarios no compatible. Falta columna: {$r}."];
+            }
+        }
+
+        // 3) Duplicados (usuario o email)
+        $st = $pdoClient->prepare("SELECT id FROM usuarios WHERE usuario = :u OR email = :e LIMIT 1");
+        $st->execute([':u' => $usuario, ':e' => $email]);
         if ($st->fetch()) {
-            return ['ok' => false, 'msg' => 'El usuario inicial ya existe.'];
+            return ['ok' => false, 'msg' => 'El usuario o email inicial ya existe en esta DB.'];
         }
 
-        // Duplicado email
-        $st = $pdoClient->prepare("SELECT id FROM usuarios WHERE email = :e LIMIT 1");
-        $st->execute([':e' => $email]);
-        if ($st->fetch()) {
-            return ['ok' => false, 'msg' => 'El email ya está en uso en esta DB.'];
-        }
-
+        // 4) Insert SUPER_ADMIN
         $hash = password_hash($password, PASSWORD_DEFAULT);
 
-        // Insert: rol SUPER_ADMIN + is_super_admin=1
         $st = $pdoClient->prepare("
-            INSERT INTO usuarios (nombre, email, usuario, password_hash, rol, activo, is_super_admin)
-            VALUES (:n, :e, :u, :ph, 'SUPER_ADMIN', 1, 1)
+            INSERT INTO usuarios (nombre, usuario, email, password_hash, rol, activo, is_super_admin)
+            VALUES (:n, :u, :e, :ph, 'SUPER_ADMIN', 1, 1)
         ");
         $st->execute([
             ':n'  => $nombre,
-            ':e'  => $email,
             ':u'  => $usuario,
+            ':e'  => $email,
             ':ph' => $hash,
         ]);
 
-        return ['ok' => true, 'msg' => 'Usuario SUPER_ADMIN creado.'];
+        return ['ok' => true, 'msg' => "Admin creado ({$usuario} / {$email})."];
 
     } catch (Exception $e) {
         return ['ok' => false, 'msg' => 'Fallo al crear el usuario inicial.'];
@@ -141,6 +155,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $admin_usuario = sa_post('admin_usuario', 'admin');
     $admin_pass    = (string)($_POST['admin_pass'] ?? '');
 
+    // 👇 Autopreset para evitar confusión (si dejaron "admin" por costumbre)
+    if ($crear_admin === 1 && $slug !== '' && trim($admin_usuario) === 'admin') {
+        $admin_usuario = $slug . '_admin';
+    }
+    if ($crear_admin === 1 && trim($admin_email) === '' && trim($admin_usuario) !== '') {
+        // Email técnico por defecto (válido). Si luego quieren recovery por email real, se cambia.
+        $admin_email = $admin_usuario . '@c2k.cl';
+    }
+
     // Validaciones mínimas
     if ($slug === '' || !sa_valid_slug($slug)) {
         $errors[] = 'Slug inválido. Solo a-z 0-9 _ - (minúsculas, sin espacios).';
@@ -158,20 +181,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Usuario inicial: contraseña mínima 6 caracteres.';
         }
 
+        if (!sa_valid_username($admin_usuario)) {
+            $errors[] = 'Usuario inicial: usuario inválido (solo letras/números y _ - . ).';
+        }
+
         if (trim($admin_email) === '') {
             $errors[] = 'Usuario inicial: email es obligatorio.';
         } elseif (!filter_var($admin_email, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = 'Usuario inicial: email no es válido.';
+            $errors[] = 'Usuario inicial: email no es válido (debe contener @).';
         }
     }
-
-    /*
-     * 🛟 GANCHO FUTURO (OPCIONAL) — BD utf8mb4_unicode_ci
-     * -----------------------------------------------
-     * Contexto (Sofi): el servidor puede tener defaults latin1.
-     * Si a futuro el Creator crea DB/tablas automáticamente:
-     * - Forzar defaults DB + CREATE TABLE ... DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci
-     */
 
     // Validar core_version exista físicamente
     $corePath = SYSTEC_ROOT ? (SYSTEC_ROOT . '/_cores/systec/' . $core_version) : '';
@@ -260,19 +279,19 @@ define('SYSTEC_CORE_PATH', realpath(__DIR__ . '/../../../../_cores/systec/{$core
 define('SYSTEC_INSTANCE_PATH', realpath(__DIR__ . '/../config/instance.php'));
 
 if (!SYSTEC_CORE_PATH || !is_dir(SYSTEC_CORE_PATH)) {
-    exit('❌ CORE no encontrado');
+    exit('CORE no encontrado');
 }
 if (!SYSTEC_INSTANCE_PATH || !is_file(SYSTEC_INSTANCE_PATH)) {
-    exit('❌ instance.php no encontrado');
+    exit('instance.php no encontrado');
 }
 
-// ✅ APP_URL de ESTA instancia (ruta pública donde vive /public/)
+// APP_URL de ESTA instancia (ruta pública donde vive /public/)
 // (Debe definirse ANTES de cargar instance.php para que APP_URL salga correcto en config)
 \$base = rtrim(str_replace('\\\\','/', dirname(\$_SERVER['SCRIPT_NAME'] ?? '')), '/');
 if (\$base === '/' || \$base === '') \$base = '';
 define('SYSTEC_APP_URL', \$base . '/');
 
-// ✅ display_errors depende de ENV (dev/prod) definido en instance.php
+// display_errors depende de ENV (dev/prod) definido en instance.php
 \$__cfg = require SYSTEC_INSTANCE_PATH;
 \$__env = strtolower((string)(\$__cfg['ENV'] ?? 'prod'));
 
@@ -286,7 +305,7 @@ if (\$__env === 'dev') {
     error_reporting(E_ALL);
 }
 
-// ✅ CORE_URL (ruta web al CORE) para cargar assets directo desde el CORE
+// CORE_URL (ruta web al CORE) para cargar assets directo desde el CORE
 \$docRoot = realpath(\$_SERVER['DOCUMENT_ROOT'] ?? '');
 \$coreFs  = realpath(SYSTEC_CORE_PATH);
 
@@ -502,7 +521,7 @@ require_once __DIR__ . '/_layout/sidebar.php';
               Crear usuario inicial <strong>SUPER_ADMIN</strong>
             </label>
             <div class="text-muted small">
-              Si la tabla <code>usuarios</code> no existe aún en la DB del cliente, el cliente se crea igual y te avisa.
+              Nota: si luego usarás recuperación por email, pon un correo real.
             </div>
           </div>
 
@@ -513,11 +532,11 @@ require_once __DIR__ . '/_layout/sidebar.php';
             </div>
             <div class="form-group col-md-4">
               <label>Email *</label>
-              <input type="text" name="admin_email" class="form-control" value="<?php echo htmlspecialchars($admin_email, ENT_QUOTES, 'UTF-8'); ?>">
+              <input type="email" name="admin_email" class="form-control" value="<?php echo htmlspecialchars($admin_email, ENT_QUOTES, 'UTF-8'); ?>" placeholder="ej: demo1_admin@c2k.cl">
             </div>
             <div class="form-group col-md-2">
               <label>Usuario *</label>
-              <input type="text" name="admin_usuario" class="form-control" value="<?php echo htmlspecialchars($admin_usuario, ENT_QUOTES, 'UTF-8'); ?>">
+              <input type="text" name="admin_usuario" class="form-control" value="<?php echo htmlspecialchars($admin_usuario, ENT_QUOTES, 'UTF-8'); ?>" placeholder="ej: demo1_admin">
             </div>
             <div class="form-group col-md-2">
               <label>Contraseña *</label>

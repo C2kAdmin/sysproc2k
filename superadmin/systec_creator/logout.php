@@ -3,13 +3,21 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/_config/config.php';
 
-// destruir sesión del creator
+// Si hay sesión activa, limpiamos todo
 $_SESSION = [];
+
 if (ini_get('session.use_cookies')) {
-    $p = session_get_cookie_params();
-    setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+    $params = session_get_cookie_params();
+    setcookie(session_name(), '', time() - 42000,
+        $params['path'] ?? '/',
+        $params['domain'] ?? '',
+        (bool)($params['secure'] ?? false),
+        (bool)($params['httponly'] ?? true)
+    );
 }
+
 session_destroy();
 
+// Redirige a login
 header('Location: ' . sa_url('/login.php'));
 exit;
