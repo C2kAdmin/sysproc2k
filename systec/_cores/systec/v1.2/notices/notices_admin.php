@@ -1,7 +1,3 @@
-FRAGMENTO LITERAL:
-(archivo nuevo)
-
-REEMPLAZO LITERAL:
 <?php
 // systec/_cores/systec/v1.2/notices/notices_admin.php
 require_once __DIR__ . '/../config/auth.php';
@@ -117,6 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       throw new Exception('Acción inválida.');
+
 
     } catch (Exception $e) {
       $err = $e->getMessage();

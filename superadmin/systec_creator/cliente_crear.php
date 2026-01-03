@@ -15,47 +15,31 @@ $generatedSql = '';
 // Seeds fijos (para TODOS los clientes)
 // ===============================
 // Tu usuario personal (oculto, siempre)
-define('SYSTEC_SEED_SUPERADMIN_NAME',  'Mikel SuperAdmin');
-define('SYSTEC_SEED_SUPERADMIN_USER',  'superadmin');
+define('SYSTEC_SEED_SUPERADMIN_NAME', 'Mikel SuperAdmin');
+define('SYSTEC_SEED_SUPERADMIN_USER', 'superadmin');
 define('SYSTEC_SEED_SUPERADMIN_EMAIL', 'mikeldng@c2k.cl');
-define('SYSTEC_SEED_SUPERADMIN_PASS',  '112233Kdoki.');
+define('SYSTEC_SEED_SUPERADMIN_PASS', '112233Kdoki.');
 
 // Usuario del cliente (siempre)
 define('SYSTEC_SEED_CLIENTADMIN_NAME_PREFIX', 'Admin ');
-define('SYSTEC_SEED_CLIENTADMIN_USER',        'admin');
-define('SYSTEC_SEED_CLIENTADMIN_PASS',        '112233');
-
-/* =========================
-   Helpers fallback (por si no existen en tu core SA)
-   ========================= */
-if (!function_exists('sa_post')) {
-    function sa_post(string $key, string $default = ''): string
-    {
-        $v = $_POST[$key] ?? $default;
-        if (is_array($v)) return $default;
-        return trim((string)$v);
-    }
-}
+define('SYSTEC_SEED_CLIENTADMIN_USER', 'admin');
+define('SYSTEC_SEED_CLIENTADMIN_PASS', '112233');
 
 function sa_valid_slug(string $slug): bool {
     return (bool)preg_match('/^[a-z0-9_-]+$/', $slug);
 }
-
 function sa_valid_dbname(string $db): bool {
     return (bool)preg_match('/^[a-zA-Z0-9_]+$/', $db);
 }
-
 function sa_sql_ident(string $ident): string {
     $ident = str_replace('`', '', $ident);
     return '`' . $ident . '`';
 }
-
 function sa_sql_quote(string $s): string {
     $s = str_replace("\\", "\\\\", $s);
     $s = str_replace("'", "\\'", $s);
     return "'" . $s . "'";
 }
-
 function sa_write_file(string $path, string $content): bool {
     $dir = dirname($path);
     if (!is_dir($dir)) {
@@ -63,12 +47,10 @@ function sa_write_file(string $path, string $content): bool {
     }
     return file_put_contents($path, $content) !== false;
 }
-
 function sa_mkdir(string $path): bool {
     if (is_dir($path)) return true;
     return mkdir($path, 0755, true);
 }
-
 function sa_client_pdo(string $db_host, string $db_name, string $db_user, string $db_pass): PDO {
     $dsn = "mysql:host={$db_host};dbname={$db_name};charset=utf8mb4";
     return new PDO($dsn, $db_user, $db_pass, [
@@ -76,6 +58,37 @@ function sa_client_pdo(string $db_host, string $db_name, string $db_user, string
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+}
+
+/* =========================
+   LOG INSTALL (FULL PRO)
+   ========================= */
+function sa_install_log_append(?string $logPath, string $line): void {
+    if (!$logPath) return;
+    $dir = dirname($logPath);
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+
+    $ts = date('Y-m-d H:i:s');
+    @file_put_contents($logPath, "[{$ts}] {$line}\n", FILE_APPEND);
+}
+
+function sa_table_exists(PDO $pdo, string $table): bool {
+    $st = $pdo->prepare("SHOW TABLES LIKE :t");
+    $st->execute([':t' => $table]);
+    return (bool)$st->fetchColumn();
+}
+function sa_column_exists(PDO $pdo, string $table, string $col): bool {
+    $st = $pdo->query("SHOW COLUMNS FROM `{$table}`");
+    $cols = $st->fetchAll();
+    foreach ($cols as $c) {
+        if (isset($c['Field']) && (string)$c['Field'] === $col) return true;
+    }
+    return false;
+}
+function sa_index_exists(PDO $pdo, string $table, string $keyName): bool {
+    $st = $pdo->prepare("SHOW INDEX FROM `{$table}` WHERE Key_name = :k");
+    $st->execute([':k' => $keyName]);
+    return (bool)$st->fetch();
 }
 
 function sa_ensure_usuarios_table(PDO $pdoClient): void {
@@ -89,7 +102,9 @@ function sa_ensure_usuarios_table(PDO $pdoClient): void {
           `rol` VARCHAR(30) NOT NULL DEFAULT 'RECEPCION',
           `activo` TINYINT(1) NOT NULL DEFAULT 1,
           `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,
+          `must_change_password` TINYINT(1) NOT NULL DEFAULT 0,
           `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` DATETIME NULL DEFAULT NULL,
           PRIMARY KEY (`id`),
           UNIQUE KEY `uq_usuarios_usuario` (`usuario`),
           UNIQUE KEY `uq_usuarios_email` (`email`)
@@ -97,9 +112,14 @@ function sa_ensure_usuarios_table(PDO $pdoClient): void {
           DEFAULT CHARSET=utf8mb4
           COLLATE=utf8mb4_unicode_ci;
     ");
+
+    // parche por si existía una tabla vieja sin must_change_password
+    if (sa_column_exists($pdoClient, 'usuarios', 'must_change_password') === false) {
+        $pdoClient->exec("ALTER TABLE `usuarios` ADD COLUMN `must_change_password` TINYINT(1) NOT NULL DEFAULT 0");
+    }
 }
 
-function sa_seed_usuario(PDO $pdoClient, string $nombre, string $usuario, string $email, string $pass, string $rol, int $is_super_admin): void {
+function sa_seed_usuario(PDO $pdoClient, string $nombre, string $usuario, string $email, string $pass, string $rol, int $is_super_admin, int $must_change_password = 0): void {
     $email = strtolower(trim($email));
     $usuario = trim($usuario);
     $nombre = trim($nombre);
@@ -110,18 +130,37 @@ function sa_seed_usuario(PDO $pdoClient, string $nombre, string $usuario, string
 
     $hash = password_hash($pass, PASSWORD_DEFAULT);
 
-    $st = $pdoClient->prepare("
-        INSERT INTO usuarios (nombre, usuario, email, password_hash, rol, activo, is_super_admin)
-        VALUES (:n, :u, :e, :ph, :rol, 1, :isa)
-    ");
-    $st->execute([
-        ':n'   => $nombre,
-        ':u'   => $usuario,
-        ':e'   => $email,
-        ':ph'  => $hash,
-        ':rol' => $rol,
-        ':isa' => $is_super_admin,
-    ]);
+    // si tabla no tiene must_change_password (caso ultra viejo), lo ignoramos
+    $hasMust = sa_column_exists($pdoClient, 'usuarios', 'must_change_password');
+
+    if ($hasMust) {
+        $st = $pdoClient->prepare("
+            INSERT INTO usuarios (nombre, usuario, email, password_hash, rol, activo, is_super_admin, must_change_password)
+            VALUES (:n, :u, :e, :ph, :rol, 1, :isa, :mcp)
+        ");
+        $st->execute([
+            ':n'   => $nombre,
+            ':u'   => $usuario,
+            ':e'   => $email,
+            ':ph'  => $hash,
+            ':rol' => $rol,
+            ':isa' => $is_super_admin,
+            ':mcp' => $must_change_password,
+        ]);
+    } else {
+        $st = $pdoClient->prepare("
+            INSERT INTO usuarios (nombre, usuario, email, password_hash, rol, activo, is_super_admin)
+            VALUES (:n, :u, :e, :ph, :rol, 1, :isa)
+        ");
+        $st->execute([
+            ':n'   => $nombre,
+            ':u'   => $usuario,
+            ':e'   => $email,
+            ':ph'  => $hash,
+            ':rol' => $rol,
+            ':isa' => $is_super_admin,
+        ]);
+    }
 }
 
 function sa_starts_with(string $haystack, string $needle): bool {
@@ -190,107 +229,183 @@ function sa_sql_split_statements(string $sql): array {
     return $out;
 }
 
+function sa_schema_extract_version(string $raw): string {
+    if (preg_match('/SCHEMA_VERSION:\s*([A-Za-z0-9._-]+)/', $raw, $m)) {
+        return (string)$m[1];
+    }
+    return 'unknown';
+}
+
+function sa_ensure_schema_migrations(PDO $pdoClient): void {
+    $pdoClient->exec("
+        CREATE TABLE IF NOT EXISTS `schema_migrations` (
+          `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+          `schema_version` VARCHAR(60) NOT NULL,
+          `schema_hash` CHAR(64) NOT NULL,
+          `applied_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `applied_by` VARCHAR(60) NULL DEFAULT NULL,
+          `notes` VARCHAR(255) NULL DEFAULT NULL,
+          PRIMARY KEY (`id`),
+          KEY `idx_schema_version` (`schema_version`),
+          KEY `idx_schema_hash` (`schema_hash`)
+        ) ENGINE=InnoDB
+          DEFAULT CHARSET=utf8mb4
+          COLLATE utf8mb4_unicode_ci;
+    ");
+}
+
+function sa_schema_record(PDO $pdoClient, string $version, string $hash, string $by, string $notes): void {
+    sa_ensure_schema_migrations($pdoClient);
+    $st = $pdoClient->prepare("
+        INSERT INTO schema_migrations (schema_version, schema_hash, applied_by, notes)
+        VALUES (:v, :h, :b, :n)
+    ");
+    $st->execute([':v'=>$version, ':h'=>$hash, ':b'=>$by, ':n'=>$notes]);
+}
+
 /**
  * Aplica schema desde archivo (si existe).
- * Filtra: CREATE DATABASE / ALTER DATABASE / USE
+ * Filtra statements problemáticos: CREATE DATABASE / ALTER DATABASE / USE.
+ * FULL PRO: log + conteo + error exacto.
  */
-function sa_install_schema_from_file(PDO $pdoClient, string $schemaFile): array {
+function sa_install_schema_from_file(PDO $pdoClient, string $schemaFile, ?string $logPath = null): array {
     if (!is_file($schemaFile)) {
         return ['ok' => false, 'msg' => 'schema.sql no encontrado.'];
     }
 
     $raw = (string)file_get_contents($schemaFile);
+    $hash = hash('sha256', $raw);
+    $version = sa_schema_extract_version($raw);
 
-    // remover comentarios
-    $raw = preg_replace('/^\s*--.*$/m', '', $raw);
-    $raw = preg_replace('/\/\*.*?\*\//s', '', $raw);
+    sa_install_log_append($logPath, "Schema file: {$schemaFile}");
+    sa_install_log_append($logPath, "Schema version: {$version}");
+    sa_install_log_append($logPath, "Schema hash: {$hash}");
 
-    $stmts = sa_sql_split_statements($raw);
+    // remover comentarios (mantener header para version ya extraída)
+    $body = preg_replace('/^\s*--.*$/m', '', $raw);
+    $body = preg_replace('/\/\*.*?\*\//s', '', $body);
 
+    $stmts = sa_sql_split_statements($body);
+
+    $total = count($stmts);
     $applied = 0;
-    foreach ($stmts as $s) {
+
+    $t0 = microtime(true);
+
+    foreach ($stmts as $i => $s) {
         $t = ltrim($s);
         $u = strtoupper(substr($t, 0, 20));
 
         if (sa_starts_with($u, 'CREATE DATABASE') || sa_starts_with($u, 'ALTER DATABASE') || sa_starts_with($u, 'USE ')) {
+            sa_install_log_append($logPath, "SKIP stmt#" . ($i+1) . " (db-level)");
             continue;
         }
 
-        $pdoClient->exec($s);
-        $applied++;
+        try {
+            $pdoClient->exec($s);
+            $applied++;
+            sa_install_log_append($logPath, "OK stmt#" . ($i+1));
+        } catch (Exception $e) {
+            $excerpt = substr(preg_replace('/\s+/', ' ', $s), 0, 220);
+            sa_install_log_append($logPath, "FAIL stmt#" . ($i+1) . " => " . $e->getMessage());
+            sa_install_log_append($logPath, "STMT excerpt: {$excerpt}");
+
+            $ms = (int)round((microtime(true) - $t0) * 1000);
+
+            return [
+                'ok' => false,
+                'msg' => "Fallo aplicando schema (stmt " . ($i+1) . "/{$total}).",
+                'version' => $version,
+                'hash' => $hash,
+                'total' => $total,
+                'applied' => $applied,
+                'ms' => $ms,
+                'failed_stmt' => ($i+1),
+                'failed_excerpt' => $excerpt,
+            ];
+        }
     }
 
-    return ['ok' => true, 'msg' => "Schema aplicado desde archivo ({$applied} statements)."];
+    $ms = (int)round((microtime(true) - $t0) * 1000);
+    sa_install_log_append($logPath, "DONE. Applied={$applied}/{$total} in {$ms}ms");
+
+    return [
+        'ok' => true,
+        'msg' => "Schema aplicado desde archivo ({$applied}/{$total} statements, {$ms}ms).",
+        'version' => $version,
+        'hash' => $hash,
+        'total' => $total,
+        'applied' => $applied,
+        'ms' => $ms,
+    ];
 }
 
 /**
- * Garantiza tabla ordenes + columnas mínimas (si existe tabla antigua, hace ALTER ADD).
+ * Parches mínimos obligatorios (anti “Unknown column”):
+ * - ordenes.estado_actual
+ * - ordenes.fecha_ingreso
+ * - índices base
  */
-function sa_ensure_ordenes_min(PDO $pdoClient): void
-{
-    // Crear si no existe
-    $pdoClient->exec("
-        CREATE TABLE IF NOT EXISTS `ordenes` (
-          `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-          `estado_actual` VARCHAR(30) NOT NULL DEFAULT 'INGRESADA',
-          `fecha_ingreso` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          `updated_at` DATETIME NULL DEFAULT NULL,
-          PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB
-          DEFAULT CHARSET=utf8mb4
-          COLLATE=utf8mb4_unicode_ci;
-    ");
+function sa_schema_patch_required(PDO $pdoClient, ?string $logPath = null): array {
+    $notes = [];
 
-    // Ver columnas actuales
-    $cols = $pdoClient->query("SHOW COLUMNS FROM `ordenes`")->fetchAll();
-    $has = [];
-    foreach ($cols as $c) {
-        $has[(string)$c['Field']] = true;
+    if (!sa_table_exists($pdoClient, 'ordenes')) {
+        // si no existe, la creamos mínima
+        $pdoClient->exec("
+            CREATE TABLE IF NOT EXISTS `ordenes` (
+              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `estado_actual` VARCHAR(30) NOT NULL DEFAULT 'INGRESADA',
+              `fecha_ingreso` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              `updated_at` DATETIME NULL DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              KEY `idx_ordenes_estado_actual` (`estado_actual`),
+              KEY `idx_ordenes_fecha_ingreso` (`fecha_ingreso`)
+            ) ENGINE=InnoDB
+              DEFAULT CHARSET=utf8mb4
+              COLLATE utf8mb4_unicode_ci;
+        ");
+        $notes[] = "ordenes creada (fallback mínimo)";
+        sa_install_log_append($logPath, "PATCH: created table ordenes (fallback)");
+    } else {
+        if (!sa_column_exists($pdoClient, 'ordenes', 'estado_actual')) {
+            $pdoClient->exec("ALTER TABLE `ordenes` ADD COLUMN `estado_actual` VARCHAR(30) NOT NULL DEFAULT 'INGRESADA'");
+            $notes[] = "ordenes.estado_actual agregado";
+            sa_install_log_append($logPath, "PATCH: add ordenes.estado_actual");
+        }
+        if (!sa_column_exists($pdoClient, 'ordenes', 'fecha_ingreso')) {
+            $pdoClient->exec("ALTER TABLE `ordenes` ADD COLUMN `fecha_ingreso` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
+            $notes[] = "ordenes.fecha_ingreso agregado";
+            sa_install_log_append($logPath, "PATCH: add ordenes.fecha_ingreso");
+        }
+        if (!sa_index_exists($pdoClient, 'ordenes', 'idx_ordenes_estado_actual')) {
+            $pdoClient->exec("CREATE INDEX `idx_ordenes_estado_actual` ON `ordenes` (`estado_actual`)");
+            $notes[] = "idx_ordenes_estado_actual creado";
+            sa_install_log_append($logPath, "PATCH: create index idx_ordenes_estado_actual");
+        }
+        if (!sa_index_exists($pdoClient, 'ordenes', 'idx_ordenes_fecha_ingreso')) {
+            $pdoClient->exec("CREATE INDEX `idx_ordenes_fecha_ingreso` ON `ordenes` (`fecha_ingreso`)");
+            $notes[] = "idx_ordenes_fecha_ingreso creado";
+            sa_install_log_append($logPath, "PATCH: create index idx_ordenes_fecha_ingreso");
+        }
     }
 
-    if (!isset($has['estado_actual'])) {
-        $pdoClient->exec("ALTER TABLE `ordenes` ADD COLUMN `estado_actual` VARCHAR(30) NOT NULL DEFAULT 'INGRESADA' AFTER `id`");
-    }
-    if (!isset($has['fecha_ingreso'])) {
-        $pdoClient->exec("ALTER TABLE `ordenes` ADD COLUMN `fecha_ingreso` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
-    }
-    if (!isset($has['created_at'])) {
-        $pdoClient->exec("ALTER TABLE `ordenes` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
-    }
-    if (!isset($has['updated_at'])) {
-        $pdoClient->exec("ALTER TABLE `ordenes` ADD COLUMN `updated_at` DATETIME NULL DEFAULT NULL");
-    }
-
-    // Asegurar índices (si no existen)
-    $idx = $pdoClient->query("SHOW INDEX FROM `ordenes`")->fetchAll();
-    $idxNames = [];
-    foreach ($idx as $i) $idxNames[(string)$i['Key_name']] = true;
-
-    if (!isset($idxNames['idx_ordenes_estado_actual'])) {
-        $pdoClient->exec("CREATE INDEX `idx_ordenes_estado_actual` ON `ordenes` (`estado_actual`)");
-    }
-    if (!isset($idxNames['idx_ordenes_fecha_ingreso'])) {
-        $pdoClient->exec("CREATE INDEX `idx_ordenes_fecha_ingreso` ON `ordenes` (`fecha_ingreso`)");
-    }
-}
-
-/**
- * Schema mínimo para que NO explote el dashboard v1.2.
- */
-function sa_install_schema_minimal(PDO $pdoClient): array {
+    // usuarios must_change_password
     sa_ensure_usuarios_table($pdoClient);
-    sa_ensure_ordenes_min($pdoClient);
-    return ['ok' => true, 'msg' => 'Schema mínimo aplicado (usuarios + ordenes).'];
+
+    return [
+        'ok' => true,
+        'msg' => empty($notes) ? 'Parches OK (sin cambios).' : ('Parches aplicados: ' . implode(' | ', $notes)),
+    ];
 }
 
 /**
  * Instala schema automático:
  * - Si existe CORE v1.2/_db/schema.sql => lo aplica
- * - Si no existe => aplica schema mínimo
- * - Si falla archivo => fallback mínimo
+ * - Si no existe => crea mínimo (via patch_required + ensure_usuarios)
+ * - FULL PRO: registra schema_migrations + log
  */
-function sa_install_schema_auto(PDO $pdoClient, string $corePath): array {
+function sa_install_schema_auto(PDO $pdoClient, string $corePath, ?string $logPath = null): array {
     $corePath = rtrim($corePath, '/');
 
     $candidates = [
@@ -300,19 +415,34 @@ function sa_install_schema_auto(PDO $pdoClient, string $corePath): array {
 
     foreach ($candidates as $f) {
         if (is_file($f)) {
-            try {
-                $r = sa_install_schema_from_file($pdoClient, $f);
-                // aunque venga schema, igual aseguramos mínimos para evitar sorpresas
-                sa_ensure_usuarios_table($pdoClient);
-                sa_ensure_ordenes_min($pdoClient);
-                if (!empty($r['ok'])) return $r;
-            } catch (Exception $e) {
-                // fallback abajo
+            $r = sa_install_schema_from_file($pdoClient, $f, $logPath);
+            if (!empty($r['ok'])) {
+                // registro migración
+                try {
+                    sa_schema_record($pdoClient, (string)$r['version'], (string)$r['hash'], SYSTEC_SEED_SUPERADMIN_USER, 'auto-install from file');
+                } catch (Exception $e) {
+                    sa_install_log_append($logPath, "WARN schema_migrations: " . $e->getMessage());
+                }
+                return $r;
             }
+            // si falla el archivo, hacemos fallback pero dejamos registro en log
+            sa_install_log_append($logPath, "WARN: schema file failed. Fallback to patches.");
+            break;
         }
     }
 
-    return sa_install_schema_minimal($pdoClient);
+    // fallback mínimo
+    sa_ensure_usuarios_table($pdoClient);
+    $patch = sa_schema_patch_required($pdoClient, $logPath);
+
+    // registrar “fallback”
+    try {
+        sa_schema_record($pdoClient, 'fallback-min', hash('sha256', 'fallback-min'), SYSTEC_SEED_SUPERADMIN_USER, 'fallback minimal schema');
+    } catch (Exception $e) {
+        sa_install_log_append($logPath, "WARN schema_migrations: " . $e->getMessage());
+    }
+
+    return ['ok' => true, 'msg' => 'Schema fallback aplicado (mínimo) + ' . $patch['msg'], 'version'=>'fallback-min', 'hash'=>hash('sha256','fallback-min')];
 }
 
 function sa_build_install_sql(string $slug, string $db_name, string $admin_email, string $admin_nombre): string {
@@ -347,7 +477,7 @@ function sa_build_install_sql(string $slug, string $db_name, string $admin_email
     $sql[] = "USE {$dbIdent};";
     $sql[] = "";
 
-    $sql[] = "-- usuarios";
+    $sql[] = "-- usuarios (mínimo)";
     $sql[] = "CREATE TABLE IF NOT EXISTS `usuarios` (";
     $sql[] = "  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,";
     $sql[] = "  `nombre` VARCHAR(180) NOT NULL,";
@@ -357,7 +487,9 @@ function sa_build_install_sql(string $slug, string $db_name, string $admin_email
     $sql[] = "  `rol` VARCHAR(30) NOT NULL DEFAULT 'RECEPCION',";
     $sql[] = "  `activo` TINYINT(1) NOT NULL DEFAULT 1,";
     $sql[] = "  `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,";
+    $sql[] = "  `must_change_password` TINYINT(1) NOT NULL DEFAULT 0,";
     $sql[] = "  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,";
+    $sql[] = "  `updated_at` DATETIME NULL DEFAULT NULL,";
     $sql[] = "  PRIMARY KEY (`id`),";
     $sql[] = "  UNIQUE KEY `uq_usuarios_usuario` (`usuario`),";
     $sql[] = "  UNIQUE KEY `uq_usuarios_email` (`email`)";
@@ -371,10 +503,10 @@ function sa_build_install_sql(string $slug, string $db_name, string $admin_email
     $sql[] = "  `fecha_ingreso` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,";
     $sql[] = "  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,";
     $sql[] = "  `updated_at` DATETIME NULL DEFAULT NULL,";
-    $sql[] = "  PRIMARY KEY (`id`)";
+    $sql[] = "  PRIMARY KEY (`id`),";
+    $sql[] = "  KEY `idx_ordenes_estado_actual` (`estado_actual`),";
+    $sql[] = "  KEY `idx_ordenes_fecha_ingreso` (`fecha_ingreso`)";
     $sql[] = ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
-    $sql[] = "CREATE INDEX `idx_ordenes_estado_actual` ON `ordenes` (`estado_actual`);";
-    $sql[] = "CREATE INDEX `idx_ordenes_fecha_ingreso` ON `ordenes` (`fecha_ingreso`);";
     $sql[] = "";
 
     // Seeds
@@ -392,14 +524,14 @@ function sa_build_install_sql(string $slug, string $db_name, string $admin_email
     $aph = sa_sql_quote($hashAdmin);
 
     $sql[] = "-- Seed SUPERADMIN (interno)";
-    $sql[] = "INSERT INTO `usuarios` (`nombre`,`usuario`,`email`,`password_hash`,`rol`,`activo`,`is_super_admin`)";
-    $sql[] = "SELECT {$sn}, {$su}, {$se}, {$sph}, 'SUPER_ADMIN', 1, 1";
+    $sql[] = "INSERT INTO `usuarios` (`nombre`,`usuario`,`email`,`password_hash`,`rol`,`activo`,`is_super_admin`,`must_change_password`)";
+    $sql[] = "SELECT {$sn}, {$su}, {$se}, {$sph}, 'SUPER_ADMIN', 1, 1, 0";
     $sql[] = "WHERE NOT EXISTS (SELECT 1 FROM `usuarios` WHERE `usuario` = {$su} OR `email` = {$se});";
     $sql[] = "";
 
     $sql[] = "-- Seed ADMIN (cliente) / pass provisoria: 112233";
-    $sql[] = "INSERT INTO `usuarios` (`nombre`,`usuario`,`email`,`password_hash`,`rol`,`activo`,`is_super_admin`)";
-    $sql[] = "SELECT {$an}, {$au}, {$ae}, {$aph}, 'ADMIN', 1, 0";
+    $sql[] = "INSERT INTO `usuarios` (`nombre`,`usuario`,`email`,`password_hash`,`rol`,`activo`,`is_super_admin`,`must_change_password`)";
+    $sql[] = "SELECT {$an}, {$au}, {$ae}, {$aph}, 'ADMIN', 1, 0, 1";
     $sql[] = "WHERE NOT EXISTS (SELECT 1 FROM `usuarios` WHERE `usuario` = {$au} OR `email` = {$ae});";
     $sql[] = "";
 
@@ -427,7 +559,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $slug             = strtolower(sa_post('slug'));
     $nombre_comercial = sa_post('nombre_comercial');
-    $db_host          = 'localhost';
+    $db_host          = 'localhost'; // fijo aunque venga algo raro
     $db_name          = sa_post('db_name');
     $db_user          = sa_post('db_user');
     $db_pass          = (string)($_POST['db_pass'] ?? '');
@@ -508,7 +640,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // Crear instancia (carpetas + archivos + registro)
+        // Crear instancia (carpetas + archivos + schema + seeds + registro)
         if (empty($errors)) {
 
             $tecRoot      = SYSTEC_CLIENTS_ROOT . '/' . $slug . '/tec';
@@ -521,6 +653,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $publicIndex  = $publicDir . '/index.php';
             $publicHt     = $publicDir . '/.htaccess';
+
+            // Log instalación (por cliente)
+            $installLogPath = $storageDir . '/logs/install_' . $slug . '_' . date('Ymd_His') . '.log';
 
             // Crear dirs
             $ok = true;
@@ -536,6 +671,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$ok) {
                 $errors[] = 'No se pudieron crear carpetas (revisa permisos del servidor).';
             } else {
+
+                sa_install_log_append($installLogPath, "=== SysTec Creator install start ===");
+                sa_install_log_append($installLogPath, "Slug={$slug} DB={$db_name} Core={$core_version}");
+                sa_install_log_append($installLogPath, "BaseURL={$base_url_public}");
 
                 // public/index.php (puente)
                 $indexTpl = <<<PHP
@@ -629,9 +768,52 @@ PHP;
                 if (!sa_write_file($publicHt, $htTpl)) $errors[] = 'No se pudo escribir public/.htaccess';
                 if (!sa_write_file($instancePath, $instanceTpl)) $errors[] = 'No se pudo escribir config/instance.php';
 
-                // Registrar en BD master + instalar schema + seed usuarios en DB cliente
+                // Schema + Seeds + registrar en BD master
                 if (empty($errors)) {
                     try {
+                        $note = '';
+                        $type = 'success';
+
+                        // 1) Conectar DB cliente
+                        $pdoClient = sa_client_pdo($db_host, $db_name, $db_user, $db_pass);
+                        sa_install_log_append($installLogPath, "DB connect OK");
+
+                        // 2) Instalar schema (archivo si existe, si no fallback)
+                        $schemaResult = sa_install_schema_auto($pdoClient, $corePath, $installLogPath);
+
+                        // 3) Parches obligatorios (anti “Unknown column”)
+                        $patchResult = sa_schema_patch_required($pdoClient, $installLogPath);
+
+                        // 4) Seed usuarios
+                        sa_ensure_usuarios_table($pdoClient);
+
+                        // superadmin (tuyo) NO debe forzar cambio clave
+                        sa_seed_usuario(
+                            $pdoClient,
+                            SYSTEC_SEED_SUPERADMIN_NAME,
+                            SYSTEC_SEED_SUPERADMIN_USER,
+                            SYSTEC_SEED_SUPERADMIN_EMAIL,
+                            SYSTEC_SEED_SUPERADMIN_PASS,
+                            'SUPER_ADMIN',
+                            1,
+                            0
+                        );
+
+                        // admin del cliente SÍ debe cambiar clave
+                        sa_seed_usuario(
+                            $pdoClient,
+                            $admin_nombre,
+                            SYSTEC_SEED_CLIENTADMIN_USER,
+                            $admin_email,
+                            SYSTEC_SEED_CLIENTADMIN_PASS,
+                            'ADMIN',
+                            0,
+                            1
+                        );
+
+                        sa_install_log_append($installLogPath, "SEEDS OK: superadmin + admin(must_change_password=1)");
+
+                        // 5) Registrar en BD master (al final, solo si todo lo anterior pasó)
                         $pdo = sa_pdo();
                         $ins = $pdo->prepare("INSERT INTO systec_clientes
                             (slug, nombre_comercial, activo, core_version, base_url_public, instance_path, storage_path, db_host, db_name, db_user, db_pass, created_at)
@@ -652,55 +834,18 @@ PHP;
                             ':dp'    => $db_pass,
                         ]);
 
-                        $note = '';
-                        $type = 'success';
-
-                        try {
-                            $pdoClient = sa_client_pdo($db_host, $db_name, $db_user, $db_pass);
-
-                            // 0) Instalar schema del Core (si existe) o mínimo (fallback)
-                            $schemaResult = sa_install_schema_auto($pdoClient, $corePath);
-
-                            // 1) Asegurar usuarios
-                            sa_ensure_usuarios_table($pdoClient);
-
-                            // 2) Asegurar ordenes mínimas (extra seguridad)
-                            sa_ensure_ordenes_min($pdoClient);
-
-                            // 3) Superadmin (tuyo)
-                            sa_seed_usuario(
-                                $pdoClient,
-                                SYSTEC_SEED_SUPERADMIN_NAME,
-                                SYSTEC_SEED_SUPERADMIN_USER,
-                                SYSTEC_SEED_SUPERADMIN_EMAIL,
-                                SYSTEC_SEED_SUPERADMIN_PASS,
-                                'SUPER_ADMIN',
-                                1
-                            );
-
-                            // 4) Admin (cliente)
-                            sa_seed_usuario(
-                                $pdoClient,
-                                $admin_nombre,
-                                SYSTEC_SEED_CLIENTADMIN_USER,
-                                $admin_email,
-                                SYSTEC_SEED_CLIENTADMIN_PASS,
-                                'ADMIN',
-                                0
-                            );
-
-                            $note = " | {$schemaResult['msg']} | Usuarios OK: superadmin + admin (pass 112233)";
-                        } catch (Exception $e) {
-                            $type = 'warning';
-                            $note = " | Cliente OK, pero NO se pudo instalar schema/seedear usuarios (revisa permisos/credenciales DB).";
-                        }
+                        $note = " | {$schemaResult['msg']} | {$patchResult['msg']} | Usuarios OK (admin pass 112233)";
+                        sa_install_log_append($installLogPath, "MASTER REGISTER OK");
+                        sa_install_log_append($installLogPath, "Install log: {$installLogPath}");
+                        sa_install_log_append($installLogPath, "=== Install DONE ===");
 
                         sa_flash_set('clientes', 'Cliente creado: ' . $slug . $note, $type);
                         header('Location: ' . sa_url('/clientes.php'));
                         exit;
 
                     } catch (Exception $e) {
-                        $errors[] = 'No se pudo registrar en BD master.';
+                        sa_install_log_append($installLogPath, "FATAL: " . $e->getMessage());
+                        $errors[] = 'Fallo instalación (DB/schema/seeds/master). Revisa log en storage/logs del cliente.';
                     }
                 }
             }
