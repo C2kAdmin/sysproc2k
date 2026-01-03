@@ -1,7 +1,8 @@
 <?php
 declare(strict_types=1);
 
-// 1️⃣ Bootstrap SuperAdmin (NO CORE)
+// superadmin/systec_creator/clientes.php
+
 require_once __DIR__ . '/_config/config.php';
 require_once __DIR__ . '/_config/auth.php';
 
@@ -116,6 +117,7 @@ require_once __DIR__ . '/_layout/sidebar.php';
                   $instanceOk = !empty($c['instance_path']) && is_file((string)$c['instance_path']);
                   $storageOk  = !empty($c['storage_path'])  && is_dir((string)$c['storage_path']);
                   $editUrl    = sa_url('/cliente_editar.php?id=' . (int)$c['id']);
+                  $delUrl     = sa_url('/cliente_eliminar.php?id=' . (int)$c['id']);
                 ?>
                 <tr>
                   <td><?php echo (int)$c['id']; ?></td>
@@ -143,6 +145,10 @@ require_once __DIR__ . '/_layout/sidebar.php';
                   </td>
                   <td class="text-right">
                     <a class="btn btn-sm btn-outline-primary" href="<?php echo htmlspecialchars($editUrl, ENT_QUOTES, 'UTF-8'); ?>">Editar</a>
+
+                    <a class="btn btn-sm btn-outline-danger" href="<?php echo htmlspecialchars($delUrl, ENT_QUOTES, 'UTF-8'); ?>">
+                      Eliminar
+                    </a>
 
                     <form method="post" style="display:inline-block;">
                       <input type="hidden" name="csrf" value="<?php echo htmlspecialchars(sa_csrf_get(), ENT_QUOTES, 'UTF-8'); ?>">
