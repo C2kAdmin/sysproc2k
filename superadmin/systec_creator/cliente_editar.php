@@ -29,76 +29,85 @@ if (!function_exists('sa_csrf_ok')) {
     }
 }
 
-$errors = [];
+function sa_rrmdir(string $dir): bool
+{
+    if (!is_dir($dir)) return true;
 
-$id = (int)($_GET['id'] ?? 0);
-if ($id <= 0) {
-    sa_flash_set('clientes', 'ID inválido.', 'danger');
-    header('Location: ' . sa_url('/clientes.php'));
-    exit;
-}
+    try {
+        $items = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
 
-// Cargar cliente
-try {
-    $pdo = sa_pdo();
-    $st = $pdo->prepare("SELECT * FROM systec_clientes WHERE id = :id LIMIT 1");
-    $st->execute([':id' => $id]);
-    $cliente = $st->fetch();
-    if (!$cliente) {
-        sa_flash_set('clientes', 'Cliente no encontrado.', 'danger');
-        header('Location: ' . sa_url('/clientes.php'));
-        exit;
+        foreach ($items as $item) {
+            /** @var SplFileInfo $item */
+            if ($item->isDir()) {
+                @rmdir($item->getRealPath());
+            } else {
+                @unlink($item->getRealPath());
+            }
+        }
+
+        return @rmdir($dir);
+    } catch (Throwable $e) {
+        return false;
     }
-} catch (Exception $e) {
-    sa_flash_set('clientes', 'Error al leer BD master.', 'danger');
-    header('Location: ' . sa_url('/clientes.php'));
-    exit;
 }
 
-// Defaults desde BD
-$slug             = (string)($cliente['slug'] ?? '');
-$nombre_comercial = (string)($cliente['nombre_comercial'] ?? '');
-$activo           = (int)($cliente['activo'] ?? 0);
-$core_version     = (string)($cliente['core_version'] ?? 'v1.2');
-$base_url_public  = (string)($cliente['base_url_public'] ?? '');
+function sa_safe_path_under(string $path, string $root): bool
+{
+    $rp = realpath($path);
+    $rr = realpath($root);
+    if (!$rp || !$rr) return false;
+    $rr = rtrim(str_replace('\\','/',$rr), '/') . '/';
+    $rp = str_replace('\\','/',$rp);
+    return strpos($rp . (is_dir($rp) ? '/' : ''), $rr) === 0;
+}
 
-$db_host          = (string)($cliente['db_host'] ?? 'localhost');
-$db_name          = (string)($cliente['db_name'] ?? '');
-$db_user          = (string)($cliente['db_user'] ?? '');
-$db_pass_mask     = '********'; // no mostramos el pass real
+$errors = [];
+$client = null;
 
-$instance_path    = (string)($cliente['instance_path'] ?? '');
-$storage_path     = (string)($cliente['storage_path'] ?? '');
+// 1) Cargar cliente por ID
+$id = (int)($_GET['id'] ?? ($_POST['id'] ?? 0));
+if ($id <= 0) {
+    $errors[] = 'ID inválido.';
+} else {
+    try {
+        $pdo = sa_pdo();
+        $st = $pdo->prepare("SELECT * FROM systec_clientes WHERE id = :id LIMIT 1");
+        $st->execute([':id' => $id]);
+        $client = $st->fetch() ?: null;
+        if (!$client) $errors[] = 'Cliente no encontrado en BD master.';
+    } catch (Exception $e) {
+        $errors[] = 'No se pudo leer BD master.';
+    }
+}
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// 2) POST: actualizar
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($errors) && $client) {
 
     if (!sa_csrf_ok((string)($_POST['csrf'] ?? ''))) {
         $errors[] = 'CSRF inválido. Recarga y vuelve a intentar.';
-    }
+    } else {
 
-    $nombre_comercial = sa_post('nombre_comercial');
-    $core_version     = sa_post('core_version', $core_version);
-    $base_url_public  = sa_post('base_url_public', $base_url_public);
+        // Campos editables
+        $nombre_comercial = trim((string)($_POST['nombre_comercial'] ?? ''));
+        $core_version_in  = trim((string)($_POST['core_version'] ?? 'v1.2'));
+        $core_version     = in_array($core_version_in, ['v1.1','v1.2'], true) ? $core_version_in : 'v1.2';
+        $activo           = isset($_POST['activo']) ? 1 : 0;
 
-    $db_host          = sa_post('db_host', $db_host);
-    $db_name          = sa_post('db_name', $db_name);
-    $db_user          = sa_post('db_user', $db_user);
-    $db_pass_new      = (string)($_POST['db_pass'] ?? '');
+        // DB creds editables (por si cambian en hosting)
+        $db_host = 'localhost';
+        $db_name = trim((string)($_POST['db_name'] ?? ''));
+        $db_user = trim((string)($_POST['db_user'] ?? ''));
+        $db_pass = (string)($_POST['db_pass'] ?? '');
 
-    $activo           = isset($_POST['activo']) ? 1 : 0;
+        if ($db_name === '' || $db_user === '' || $db_pass === '') {
+            $errors[] = 'DB name/user/pass son obligatorios.';
+        }
 
-    if ($db_host === '' || $db_name === '' || $db_user === '') {
-        $errors[] = 'DB host/name/user son obligatorios.';
-    }
-
-    // Validar core_version exista físicamente
-    $corePath = SYSTEC_ROOT ? (SYSTEC_ROOT . '/_cores/systec/' . $core_version) : '';
-    if (!$corePath || !is_dir($corePath) || !is_file($corePath . '/router.php')) {
-        $errors[] = 'core_version no existe en el servidor (' . htmlspecialchars($core_version, ENT_QUOTES, 'UTF-8') . ').';
-    }
-
-    // Si base_url_public viene vacío => recalcular automático
-    if (trim((string)$base_url_public) === '') {
+        // Recalcular URL pública (siempre automática)
+        $slug = (string)($client['slug'] ?? '');
         $https  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
         $scheme = $https ? 'https://' : 'http://';
         $host   = (string)($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost');
@@ -110,49 +119,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pubPath = $sysproWeb . '/systec/_clients/' . $slug . '/tec/public/';
         $base_url_public = $scheme . $host . $pubPath;
-    }
 
-    if (empty($errors)) {
-        try {
-            $pdo = sa_pdo();
+        // Guardar
+        if (empty($errors)) {
+            try {
+                $pdo = sa_pdo();
 
-            // Si no viene pass nuevo, mantenemos el existente
-            $db_pass_final = $db_pass_new !== '' ? $db_pass_new : (string)($cliente['db_pass'] ?? '');
+                $st = $pdo->prepare("
+                    UPDATE systec_clientes
+                    SET
+                      nombre_comercial = :nom,
+                      activo = :act,
+                      core_version = :core,
+                      base_url_public = :url,
+                      db_host = :h,
+                      db_name = :dn,
+                      db_user = :du,
+                      db_pass = :dp,
+                      updated_at = NOW()
+                    WHERE id = :id
+                    LIMIT 1
+                ");
 
-            $up = $pdo->prepare("UPDATE systec_clientes SET
-                    nombre_comercial = :nom,
-                    activo = :act,
-                    core_version = :core,
-                    base_url_public = :url,
-                    db_host = :h,
-                    db_name = :dn,
-                    db_user = :du,
-                    db_pass = :dp
-                WHERE id = :id
-                LIMIT 1");
+                $st->execute([
+                    ':nom'  => $nombre_comercial,
+                    ':act'  => $activo,
+                    ':core' => $core_version,
+                    ':url'  => $base_url_public,
+                    ':h'    => $db_host,
+                    ':dn'   => $db_name,
+                    ':du'   => $db_user,
+                    ':dp'   => $db_pass,
+                    ':id'   => (int)$client['id'],
+                ]);
 
-            $up->execute([
-                ':nom'  => $nombre_comercial,
-                ':act'  => $activo,
-                ':core' => $core_version,
-                ':url'  => $base_url_public,
-                ':h'    => $db_host,
-                ':dn'   => $db_name,
-                ':du'   => $db_user,
-                ':dp'   => $db_pass_final,
-                ':id'   => $id,
-            ]);
+                sa_flash_set('clientes', 'Cliente actualizado: ' . $slug, 'success');
+                header('Location: ' . sa_url('/clientes.php'));
+                exit;
 
-            sa_flash_set('clientes', 'Cliente actualizado: ' . $slug, 'success');
-            header('Location: ' . sa_url('/clientes.php'));
-            exit;
-
-        } catch (Exception $e) {
-            $errors[] = 'No se pudo actualizar en BD master.';
+            } catch (Exception $e) {
+                $errors[] = 'No se pudo actualizar el registro en BD master.';
+            }
         }
     }
 }
 
+// Layout
 require_once __DIR__ . '/_layout/header.php';
 require_once __DIR__ . '/_layout/sidebar.php';
 ?>
@@ -160,15 +172,12 @@ require_once __DIR__ . '/_layout/sidebar.php';
 <div class="sa-main">
   <div class="sa-top">
     <strong>SysTec Creator</strong>
-    <div class="text-muted small">Editar cliente</div>
+    <div class="text-muted small">Editar cliente (BD master)</div>
   </div>
 
   <div class="sa-content">
 
-    <div class="d-flex align-items-center justify-content-between mb-3">
-      <h4 class="mb-0">Editar: <code><?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?></code></h4>
-      <a class="btn btn-sm btn-light" href="<?php echo sa_url('/clientes.php'); ?>">Volver</a>
-    </div>
+    <h4 class="mb-3">Editar cliente</h4>
 
     <?php if (!empty($errors)): ?>
       <div class="alert alert-danger">
@@ -180,80 +189,151 @@ require_once __DIR__ . '/_layout/sidebar.php';
       </div>
     <?php endif; ?>
 
-    <div class="card mb-3">
-      <div class="card-body">
-        <div class="text-muted small mb-2">Rutas (solo lectura)</div>
-        <div><strong>instance_path:</strong> <code><?php echo htmlspecialchars($instance_path, ENT_QUOTES, 'UTF-8'); ?></code></div>
-        <div><strong>storage_path:</strong> <code><?php echo htmlspecialchars($storage_path, ENT_QUOTES, 'UTF-8'); ?></code></div>
+    <?php if ($client): ?>
+      <?php
+        $slug = (string)($client['slug'] ?? '');
+
+        // Valores actuales para el form
+        $nombre_comercial = (string)($client['nombre_comercial'] ?? '');
+        $core_version     = (string)($client['core_version'] ?? 'v1.2');
+        $activo           = (int)($client['activo'] ?? 1);
+
+        $db_name = (string)($client['db_name'] ?? '');
+        $db_user = (string)($client['db_user'] ?? '');
+        $db_pass = (string)($client['db_pass'] ?? '');
+
+        $instance_path = (string)($client['instance_path'] ?? '');
+        $storage_path  = (string)($client['storage_path'] ?? '');
+        $base_url_public = (string)($client['base_url_public'] ?? '');
+
+        $clientsRoot = (defined('SYSTEC_CLIENTS_ROOT') && SYSTEC_CLIENTS_ROOT) ? (string)SYSTEC_CLIENTS_ROOT : '';
+        $clientRoot  = ($clientsRoot !== '' ? ($clientsRoot . '/' . $slug) : '');
+
+        $fsOk = true;
+        if ($clientsRoot && $clientRoot && is_dir($clientRoot)) {
+            $fsOk = sa_safe_path_under($clientRoot, $clientsRoot);
+        }
+      ?>
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <div><strong>Slug:</strong> <code><?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?></code></div>
+          <div class="small text-muted mt-1">
+            Instance: <code><?php echo htmlspecialchars($instance_path, ENT_QUOTES, 'UTF-8'); ?></code><br>
+            Storage: <code><?php echo htmlspecialchars($storage_path, ENT_QUOTES, 'UTF-8'); ?></code><br>
+            URL: <code><?php echo htmlspecialchars($base_url_public, ENT_QUOTES, 'UTF-8'); ?></code>
+          </div>
+
+          <?php if (!$fsOk): ?>
+            <div class="alert alert-warning mt-3 mb-0">
+              Ruta FS no segura (fuera de _clients). No se permite operación de carpetas.
+            </div>
+          <?php endif; ?>
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <div class="card-body">
+      <div class="card">
+        <div class="card-body">
 
-        <form method="post" autocomplete="off">
-          <input type="hidden" name="csrf" value="<?php echo htmlspecialchars(sa_csrf_get(), ENT_QUOTES, 'UTF-8'); ?>">
+          <form method="post" autocomplete="off">
+            <input type="hidden" name="csrf" value="<?php echo htmlspecialchars(sa_csrf_get(), ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="id" value="<?php echo (int)$client['id']; ?>">
 
-          <div class="form-row">
-            <div class="form-group col-md-4">
-              <label>Slug</label>
-              <input type="text" class="form-control" value="<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>" disabled>
-              <small class="text-muted">no editable (impacta rutas)</small>
+            <div class="form-row">
+              <div class="form-group col-md-8">
+                <label>Nombre comercial</label>
+                <input type="text" name="nombre_comercial" class="form-control"
+                       value="<?php echo htmlspecialchars($nombre_comercial, ENT_QUOTES, 'UTF-8'); ?>">
+              </div>
+              <div class="form-group col-md-2">
+                <label>Versión core</label>
+                <select name="core_version" class="form-control">
+                  <option value="v1.1" <?php echo ($core_version==='v1.1')?'selected':''; ?>>v1.1</option>
+                  <option value="v1.2" <?php echo ($core_version==='v1.2')?'selected':''; ?>>v1.2</option>
+                </select>
+              </div>
+              <div class="form-group col-md-2">
+                <label>Activo</label>
+                <div class="form-control" style="height:auto;">
+                  <label class="mb-0">
+                    <input type="checkbox" name="activo" value="1" <?php echo ($activo===1)?'checked':''; ?>>
+                    Sí
+                  </label>
+                </div>
+              </div>
             </div>
-            <div class="form-group col-md-8">
-              <label>Nombre comercial</label>
-              <input type="text" name="nombre_comercial" class="form-control" value="<?php echo htmlspecialchars($nombre_comercial, ENT_QUOTES, 'UTF-8'); ?>">
+
+            <hr>
+
+            <h5 class="mb-2">Credenciales DB (cliente)</h5>
+
+            <div class="form-row">
+              <div class="form-group col-md-4">
+                <label>DB Host</label>
+                <input type="text" class="form-control" value="localhost" disabled>
+              </div>
+              <div class="form-group col-md-4">
+                <label>DB Name *</label>
+                <input type="text" name="db_name" class="form-control"
+                       value="<?php echo htmlspecialchars($db_name, ENT_QUOTES, 'UTF-8'); ?>" required>
+              </div>
+              <div class="form-group col-md-4">
+                <label>DB User *</label>
+                <input type="text" name="db_user" class="form-control"
+                       value="<?php echo htmlspecialchars($db_user, ENT_QUOTES, 'UTF-8'); ?>" required autocomplete="new-password">
+              </div>
             </div>
+
+            <div class="form-row">
+              <div class="form-group col-md-6">
+                <label>DB Pass *</label>
+                <input type="password" name="db_pass" class="form-control" value="" required autocomplete="new-password">
+                <small class="text-muted">Por seguridad no pre-cargamos la contraseña. Reingrésala para guardar.</small>
+              </div>
+              <div class="form-group col-md-6">
+                <label>DB Pass actual (solo referencia)</label>
+                <input type="text" class="form-control" value="<?php echo htmlspecialchars($db_pass, ENT_QUOTES, 'UTF-8'); ?>" readonly>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" type="submit">Guardar cambios</button>
+            <a class="btn btn-light" href="<?php echo sa_url('/clientes.php'); ?>">Volver</a>
+
+          </form>
+
+          <hr>
+
+          <h5 class="mb-2">Reparar estructura de carpetas (opcional)</h5>
+          <div class="text-muted small mb-2">
+            Esto solo sirve si el cliente quedó “a medias” y quieres limpiar y recrear carpeta completa.
           </div>
 
-          <div class="form-row">
-            <div class="form-group col-md-4">
-              <label>Core version</label>
-              <select name="core_version" class="form-control">
-                <option value="v1.1" <?php echo ($core_version==='v1.1')?'selected':''; ?>>v1.1</option>
-                <option value="v1.2" <?php echo ($core_version==='v1.2')?'selected':''; ?>>v1.2</option>
-              </select>
-            </div>
-            <div class="form-group col-md-8">
-              <label>Base URL pública (vacío = auto)</label>
-              <input type="text" name="base_url_public" class="form-control" value="<?php echo htmlspecialchars($base_url_public, ENT_QUOTES, 'UTF-8'); ?>">
-            </div>
-          </div>
+          <?php if ($fsOk && $clientRoot && is_dir($clientRoot)): ?>
+            <form method="post" action="<?php echo sa_url('/cliente_eliminar.php?id=' . (int)$client['id']); ?>">
+              <input type="hidden" name="csrf" value="<?php echo htmlspecialchars(sa_csrf_get(), ENT_QUOTES, 'UTF-8'); ?>">
+              <input type="hidden" name="id" value="<?php echo (int)$client['id']; ?>">
+              <input type="hidden" name="confirm_slug" value="<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>">
 
-          <div class="form-row">
-            <div class="form-group col-md-3">
-              <label>DB Host *</label>
-              <input type="text" name="db_host" class="form-control" value="<?php echo htmlspecialchars($db_host, ENT_QUOTES, 'UTF-8'); ?>" required>
-            </div>
-            <div class="form-group col-md-3">
-              <label>DB Name *</label>
-              <input type="text" name="db_name" class="form-control" value="<?php echo htmlspecialchars($db_name, ENT_QUOTES, 'UTF-8'); ?>" required>
-            </div>
-            <div class="form-group col-md-3">
-              <label>DB User *</label>
-              <input type="text" name="db_user" class="form-control" value="<?php echo htmlspecialchars($db_user, ENT_QUOTES, 'UTF-8'); ?>" required>
-            </div>
-            <div class="form-group col-md-3">
-              <label>DB Pass (dejar vacío = mantener)</label>
-              <input type="password" name="db_pass" class="form-control" value="">
-              <small class="text-muted">actual: <?php echo htmlspecialchars($db_pass_mask, ENT_QUOTES, 'UTF-8'); ?></small>
-            </div>
-          </div>
+              <input type="hidden" name="delete_fs" value="1">
+              <input type="hidden" name="wipe_db" value="0">
+              <input type="hidden" name="drop_db" value="0">
+              <input type="hidden" name="delete_master" value="0">
 
-          <div class="form-group">
-            <label>
-              <input type="checkbox" name="activo" value="1" <?php echo ($activo===1)?'checked':''; ?>>
-              Cliente activo
-            </label>
-          </div>
+              <button class="btn btn-outline-danger" type="submit"
+                onclick="return confirm('Esto borrará SOLO la carpeta del cliente (no DB, no master). ¿Seguro?');">
+                Borrar carpeta del cliente (solo FS)
+              </button>
+            </form>
+          <?php else: ?>
+            <div class="alert alert-light mb-0">
+              No se detectó carpeta del cliente o la ruta no es segura.
+            </div>
+          <?php endif; ?>
 
-          <button class="btn btn-primary" type="submit">Guardar cambios</button>
-          <a class="btn btn-light" href="<?php echo sa_url('/clientes.php'); ?>">Cancelar</a>
-
-        </form>
-
+        </div>
       </div>
-    </div>
+
+    <?php endif; ?>
 
   </div>
 </div>

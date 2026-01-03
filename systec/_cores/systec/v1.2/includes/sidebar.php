@@ -153,6 +153,13 @@ switch ($usuarioRol) {
                         <i class="la la-whatsapp"></i><p>Mensajes WhatsApp</p>
                     </a>
                 </li>
+
+                <!-- ✅ NUEVO: Noticias/Avisos (por cliente) -->
+                <li class="nav-item">
+                    <a href="<?php echo $APP; ?>/notices/notices_admin.php">
+                        <i class="la la-bullhorn"></i><p>Noticias / Avisos</p>
+                    </a>
+                </li>
             <?php endif; ?>
 
             <!-- SOLO SUPER_ADMIN -->

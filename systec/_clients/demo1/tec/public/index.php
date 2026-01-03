@@ -1,34 +1,39 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
 /**
  * Puente INSTANCIA -> CORE
- * Cliente: cliente1
- * Sistema: SysTec <?php echo SYSTEC_VERSION; ?>
-
- * Versión: v1.1
+ * Cliente: demo1
+ * Versión Core: v1.2
  */
 
-// ✅ Rutas correctas según tu estructura REAL
 define('SYSTEC_CORE_PATH', realpath(__DIR__ . '/../../../../_cores/systec/v1.2'));
 define('SYSTEC_INSTANCE_PATH', realpath(__DIR__ . '/../config/instance.php'));
 
-// ✅ Validaciones
 if (!SYSTEC_CORE_PATH || !is_dir(SYSTEC_CORE_PATH)) {
-    http_response_code(500);
-    exit('❌ CORE SysTec no encontrado');
+    exit('❌ CORE no encontrado');
 }
 if (!SYSTEC_INSTANCE_PATH || !is_file(SYSTEC_INSTANCE_PATH)) {
-    http_response_code(500);
     exit('❌ instance.php no encontrado');
 }
 
-// ✅ APP_URL de ESTA instancia (ruta pública donde vive /public)
+// ✅ APP_URL de ESTA instancia (ruta pública donde vive /public/)
+// (Debe definirse ANTES de cargar instance.php para que APP_URL salga correcto en config)
 $base = rtrim(str_replace('\\','/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
 if ($base === '/' || $base === '') $base = '';
-define('SYSTEC_APP_URL', $base);
+define('SYSTEC_APP_URL', $base . '/');
+
+// ✅ display_errors depende de ENV (dev/prod) definido en instance.php
+$__cfg = require SYSTEC_INSTANCE_PATH;
+$__env = strtolower((string)($__cfg['ENV'] ?? 'prod'));
+
+if ($__env === 'dev') {
+    ini_set('display_errors', '1');
+    ini_set('display_startup_errors', '1');
+    error_reporting(E_ALL);
+} else {
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    error_reporting(E_ALL);
+}
 
 // ✅ CORE_URL (ruta web al CORE) para cargar assets directo desde el CORE
 $docRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
@@ -42,5 +47,4 @@ if ($docRoot && $coreFs && strpos($coreFs, $docRoot) === 0) {
 $coreRel = rtrim($coreRel, '/');
 define('SYSTEC_CORE_URL', $coreRel);
 
-// ✅ Ejecutar router del CORE
 require SYSTEC_CORE_PATH . '/router.php';

@@ -8,12 +8,8 @@
 SET NAMES utf8mb4;
 SET CHARACTER SET utf8mb4;
 
--- Para creación ordenada de FKs (no afecta si no hay FKs aún)
 SET FOREIGN_KEY_CHECKS = 0;
 
--- -------------------------
--- schema_migrations (tracking)
--- -------------------------
 CREATE TABLE IF NOT EXISTS `schema_migrations` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `schema_version` VARCHAR(60) NOT NULL,
@@ -28,9 +24,6 @@ CREATE TABLE IF NOT EXISTS `schema_migrations` (
   KEY `idx_schema_applied_at` (`applied_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- usuarios
--- -------------------------
 CREATE TABLE IF NOT EXISTS `usuarios` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `nombre` VARCHAR(180) NOT NULL,
@@ -51,9 +44,6 @@ CREATE TABLE IF NOT EXISTS `usuarios` (
   KEY `idx_usuarios_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- clientes
--- -------------------------
 CREATE TABLE IF NOT EXISTS `clientes` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `nombre` VARCHAR(180) NOT NULL,
@@ -71,9 +61,6 @@ CREATE TABLE IF NOT EXISTS `clientes` (
   KEY `idx_clientes_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- equipos
--- -------------------------
 CREATE TABLE IF NOT EXISTS `equipos` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `cliente_id` INT UNSIGNED NULL DEFAULT NULL,
@@ -96,9 +83,6 @@ CREATE TABLE IF NOT EXISTS `equipos` (
     ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- ordenes (mínimo + compatible dashboard)
--- -------------------------
 CREATE TABLE IF NOT EXISTS `ordenes` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `cliente_id` INT UNSIGNED NULL DEFAULT NULL,
@@ -151,9 +135,6 @@ CREATE TABLE IF NOT EXISTS `ordenes` (
     ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- ordenes_eventos (historial)
--- -------------------------
 CREATE TABLE IF NOT EXISTS `ordenes_eventos` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `orden_id` INT UNSIGNED NOT NULL,
@@ -173,9 +154,6 @@ CREATE TABLE IF NOT EXISTS `ordenes_eventos` (
     ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- evidencias
--- -------------------------
 CREATE TABLE IF NOT EXISTS `evidencias` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `orden_id` INT UNSIGNED NOT NULL,
@@ -192,9 +170,6 @@ CREATE TABLE IF NOT EXISTS `evidencias` (
     ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- firmas
--- -------------------------
 CREATE TABLE IF NOT EXISTS `firmas` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `orden_id` INT UNSIGNED NOT NULL,
@@ -209,9 +184,6 @@ CREATE TABLE IF NOT EXISTS `firmas` (
     ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -------------------------
--- parametros
--- -------------------------
 CREATE TABLE IF NOT EXISTS `parametros` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `clave` VARCHAR(80) NOT NULL,
@@ -222,5 +194,10 @@ CREATE TABLE IF NOT EXISTS `parametros` (
   UNIQUE KEY `uq_parametros_clave` (`clave`),
   KEY `idx_parametros_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Compat dashboard: lo pide como tabla/vista
+CREATE OR REPLACE VIEW `ordenes_evidencias` AS
+SELECT `id`,`orden_id`,`tipo`,`ruta`,`descripcion`,`created_at`
+FROM `evidencias`;
 
 SET FOREIGN_KEY_CHECKS = 1;
